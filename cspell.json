@@ -27,7 +27,7 @@
     "HEALTHCHECK", "healthcheck", "cpus", "distroless",
     "pgdata", "initdb", "isready", "redisdata",
     "buildx", "multiarch", "cves",
-    "dpsa", "dimg", "dbash", "dlog", "dclean", "dstat", "Perc",
+    "dpsa", "dimg", "dbash", "dlog", "dclean", "dstat", "Perc", "shellcheck",
     "Subchart"
   ],
   "ignorePaths": [
