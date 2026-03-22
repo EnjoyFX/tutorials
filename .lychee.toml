@@ -1,0 +1,17 @@
+# Skip localhost and placeholder URLs used in examples
+exclude = [
+  "http://localhost",
+  "http://127\\.0\\.0\\.1",
+  "https?://my\\.registry",
+  "https?://myapp\\.",
+  "http://192\\.168\\.",
+  "https://get\\.k3s\\.io",
+  "https://grafana\\.internal"
+]
+
+# Don't fail on anchors (GitHub renders them differently)
+include_fragments = false
+
+# Retry on timeout
+max_retries = 3
+timeout = 20

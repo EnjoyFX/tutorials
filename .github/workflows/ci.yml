@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  markdown-lint:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: "**/*.md"
+
+  links-check:
+    name: Links check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config .lychee.toml --verbose '**/*.md'
+          fail: true
+
+  spellcheck:
+    name: Spellcheck (EN)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: streetsidesoftware/cspell-action@v6
+        with:
+          files: |
+            en/**/*.md
+            examples/**/*.md
+            README.md
+          config: cspell.json
+
+  syntax-check:
+    name: Syntax check (examples)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python — py_compile
+        run: python3 -m py_compile examples/docker/app.py
+
+      - name: Dockerfile — hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: examples/docker/Dockerfile
+
+      - name: Shell — shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: examples/k3s
+
+      - name: Helm — helm lint
+        uses: azure/setup-helm@v4
+      - run: helm lint examples/helm/myapp

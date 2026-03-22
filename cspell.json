@@ -1,0 +1,27 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "myapp", "appuser", "nodename",
+    "kubectl", "kubeconfig", "kubelet", "kubens", "kubectx",
+    "k3s", "k3d", "kube", "crictl", "containerd", "etcd",
+    "helmfile", "nindent", "toYaml", "trimSuffix",
+    "Dockerfile", "dockerignore", "multistage",
+    "ClusterIP", "NodePort", "LoadBalancer",
+    "ConfigMap", "DaemonSet", "StatefulSet",
+    "PersistentVolume", "PersistentVolumeClaim",
+    "liveness", "readiness", "pullPolicy", "imagePullPolicy",
+    "securityContext", "runAsNonRoot", "replicaCount",
+    "nodeSelector", "cordon", "uncordon",
+    "Traefik", "Flannel", "CoreDNS",
+    "BaseHTTPRequestHandler", "HTTPServer", "wfile",
+    "rancher", "WORKDIR"
+  ],
+  "ignorePaths": [
+    "ua/**",
+    ".git/**",
+    ".github/**",
+    "examples/helm/**/*.yaml",
+    "examples/helm/**/*.tpl"
+  ]
+}
