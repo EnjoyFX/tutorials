@@ -1,0 +1,19 @@
+{
+  "plugins": {
+    "line-length": {
+      "enabled": false
+    },
+    "no-duplicate-heading": {
+      "enabled": false
+    },
+    "blanks-around-fences": {
+      "enabled": false
+    },
+    "fenced-code-language": {
+      "enabled": false
+    },
+    "no-inline-html": {
+      "enabled": false
+    }
+  }
+}

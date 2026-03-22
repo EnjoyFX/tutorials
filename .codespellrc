@@ -1,0 +1,4 @@
+[codespell]
+skip = ./.git,./.github,./ua,./examples/helm/**/*.yaml,./examples/helm/**/*.tpl
+ignore-words-list = crate,nd,teh
+quiet-level = 2

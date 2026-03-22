@@ -1,0 +1,2 @@
+pymarkdownlnt~=0.9
+codespell~=2.4

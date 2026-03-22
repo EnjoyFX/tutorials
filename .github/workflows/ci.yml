@@ -13,9 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DavidAnson/markdownlint-cli2-action@v16
+      - uses: actions/setup-python@v5
         with:
-          globs: "**/*.md"
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: pymarkdownlnt --config .pymarkdown.json scan .
 
   links-check:
     name: Links check
@@ -32,13 +34,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: streetsidesoftware/cspell-action@v6
+      - uses: actions/setup-python@v5
         with:
-          files: |
-            en/**/*.md
-            examples/**/*.md
-            README.md
-          config: cspell.json
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: codespell --config .codespellrc en README.md examples
 
   syntax-check:
     name: Syntax check (examples)

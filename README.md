@@ -51,7 +51,7 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 │   ├── helm/myapp/          # Helm chart
 │   └── k3s/                 # deploy.sh
 └── scripts/
-    └── lint.sh              # Local lint (markdownlint + cspell + helm lint + ...)
+    └── lint.sh              # Local lint (PyMarkdownLnt + codespell + helm lint + ...)
 ```
 
 ---
@@ -72,8 +72,10 @@ ln -sf ../../scripts/lint.sh .git/hooks/pre-push
 ### Run lint manually
 
 ```sh
+python3 -m pip install -r requirements-dev.txt
 sh scripts/lint.sh
 ```
 
-Required tools: `npm` (markdownlint, cspell), `python3`, `helm`.
+Required tools: `python3`, `helm`.
+Python lint tools: `pip install -r requirements-dev.txt`
 Optional: `shellcheck` — `brew install shellcheck`.

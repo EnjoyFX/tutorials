@@ -6,9 +6,10 @@
 # Or run manually:
 #   sh scripts/lint.sh
 #
-# Required tools (installed on demand via npx, or manually):
-#   npm (for markdownlint-cli2 and cspell)
+# Required tools:
 #   python3
+#   pymarkdownlnt — pip install -r requirements-dev.txt
+#   codespell    — pip install -r requirements-dev.txt
 #   shellcheck   — brew install shellcheck
 #   helm         — https://helm.sh/docs/intro/install/
 
@@ -36,30 +37,12 @@ run() {
   fi
 }
 
-run_npx() {
-  label="$1"; pkg="$2"; shift 2
-  printf "  %-30s" "$label"
-  if ! command -v npx > /dev/null 2>&1; then
-    echo "– (skip: npx not found)"
-    SKIP=$((SKIP + 1))
-    return 0
-  fi
-  if npx --yes "$pkg" "$@" > /tmp/lint_out 2>&1; then
-    echo "✓"
-    PASS=$((PASS + 1))
-  else
-    echo "✗"
-    cat /tmp/lint_out
-    FAIL=$((FAIL + 1))
-  fi
-}
-
 echo ""
 echo "Running lint checks..."
 echo "────────────────────────────────────────"
 
-run_npx "markdownlint"       markdownlint-cli2 "**/*.md" --config .markdownlint.json
-run_npx "spellcheck (EN)"    cspell --config cspell.json --no-progress "en/**/*.md" "examples/**/*.md" "README.md"
+run     "markdown lint"      pymarkdownlnt --config .pymarkdown.json scan .
+run     "spellcheck (EN)"    codespell --config .codespellrc en README.md examples
 run     "python syntax"      python3 -m py_compile examples/docker/app.py
 run     "shellcheck"         shellcheck examples/k3s/deploy.sh
 run     "helm lint"          helm lint examples/helm/myapp
