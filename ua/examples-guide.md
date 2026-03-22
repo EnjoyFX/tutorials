@@ -111,32 +111,38 @@ server.serve_forever()
 ```dockerfile
 FROM python:3-alpine
 ```
+
 Мінімальний базовий образ. `alpine` — дистрибутив Linux ~5MB. Без зайвих утиліт, менша поверхня атаки.
 
 ```dockerfile
 WORKDIR /app
 ```
+
 Встановлює робочу директорію. Всі наступні `COPY`, `RUN`, `CMD` виконуються відносно неї. Краще ніж `cd` у `RUN`.
 
 ```dockerfile
 COPY app.py .
 ```
+
 Копіюємо тільки те що потрібно. Не `COPY . .` — не тягнемо зайве (`.git`, локальні конфіги, тощо).
 
 ```dockerfile
 RUN adduser -D -u 1001 appuser
 USER appuser
 ```
+
 Створюємо непривілейованого користувача і перемикаємося на нього. Контейнер не повинен запускатись від `root` — це базова вимога безпеки. У Helm-чарті `securityContext` додатково це підтверджує.
 
 ```dockerfile
 EXPOSE 8080
 ```
+
 Документує який порт використовує застосунок. Не відкриває порт назовні — це лише метадата для `docker inspect` і оркестраторів.
 
 ```dockerfile
 CMD ["python", "app.py"]
 ```
+
 Команда запуску. Exec-форма (масив) — запускає процес напряму, без shell. PID 1 отримує `SIGTERM` коректно при `docker stop`.
 
 ### Збірка та запуск
@@ -215,6 +221,7 @@ resources:
 ### templates/deployment.yaml — ключові моменти
 
 **Liveness probe** — перевіряє чи процес живий. Якщо не відповідає — pod перезапускається.
+
 ```yaml
 livenessProbe:
   httpGet:
@@ -225,6 +232,7 @@ livenessProbe:
 ```
 
 **Readiness probe** — перевіряє чи pod готовий приймати трафік. Якщо не відповідає — pod виключається з rotation сервісу, але не перезапускається.
+
 ```yaml
 readinessProbe:
   httpGet:
@@ -235,6 +243,7 @@ readinessProbe:
 ```
 
 **securityContext** — підтверджує на рівні Kubernetes що процес не root:
+
 ```yaml
 securityContext:
   runAsNonRoot: true
@@ -242,6 +251,7 @@ securityContext:
 ```
 
 **Змінні середовища з values.yaml:**
+
 ```yaml
 env:
   {{- range $key, $val := .Values.env }}
@@ -249,6 +259,7 @@ env:
     value: {{ $val | quote }}
   {{- end }}
 ```
+
 `range` ітерує по мапі `env` у values. `quote` огортає значення в лапки — захист від YAML-інтерпретації чисел як int.
 
 ### templates/service.yaml
@@ -302,6 +313,7 @@ docker save myapp:latest | sudo k3s ctr images import -
 - `k3s ctr images import -` — читає tar з stdin і додає в containerd k3s
 
 Після цього образ доступний в k3s:
+
 ```bash
 sudo k3s ctr images list | grep myapp
 ```

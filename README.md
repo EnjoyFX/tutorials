@@ -20,12 +20,15 @@ Each guide is written as a real-world reference — not a list of commands, but 
 ## What's Inside
 
 ### Docker
+
 Covers the full day-to-day workflow: building images, writing good Dockerfiles (with a "bad vs right" comparison), multi-stage builds, container management, debugging techniques, volumes, networking, Docker Compose for local development, publishing to registries, and CI/CD integration.
 
 ### Helm
+
 The Kubernetes package manager from the ground up: core concepts, working with repositories, installing and rolling back releases, values and environment overrides, writing your own chart with templates and helpers, debugging rendered manifests, and Helmfile for multi-release management.
 
 ### k3s
+
 Lightweight Kubernetes in practice: installation, daily cluster diagnostics, deploying and rolling back applications, namespace and context management with kubectx/kubens, troubleshooting CrashLoopBackOff and ImagePullBackOff, Traefik Ingress, persistent storage with PVC, secrets management, and multi-node cluster operations.
 
 ---

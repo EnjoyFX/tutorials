@@ -45,16 +45,19 @@ docker build -t myapp:latest examples/docker/
 ```
 
 **k3s** — uses containerd directly, Docker daemon is separate; image must be piped in via stdin:
+
 ```sh
 docker save myapp:latest | sudo k3s ctr images import -
 ```
 
 **k3d** — k3s running inside Docker containers; has a built-in import command that copies the image into the cluster's Docker network:
+
 ```sh
 k3d image import myapp:latest -c <cluster-name>
 ```
 
 **kind** — Kubernetes nodes run as Docker containers; image is loaded directly from the local Docker daemon:
+
 ```sh
 kind load docker-image myapp:latest --name <cluster-name>
 ```
