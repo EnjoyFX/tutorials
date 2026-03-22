@@ -46,8 +46,34 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 │   ├── helm-guide.md
 │   ├── k3s-dev-guide.md
 │   └── examples-guide.md   # Demo app walkthrough
-└── examples/                # Runnable demo: Docker → Helm → k3s
-    ├── docker/              # Python app + Dockerfile
-    ├── helm/myapp/          # Helm chart
-    └── k3s/                 # deploy.sh
+├── examples/                # Runnable demo: Docker → Helm → k3s
+│   ├── docker/              # Python app + Dockerfile
+│   ├── helm/myapp/          # Helm chart
+│   └── k3s/                 # deploy.sh
+└── scripts/
+    └── lint.sh              # Local lint (markdownlint + cspell + helm lint + ...)
 ```
+
+---
+
+## Contributing
+
+### Install the pre-push hook
+
+The hook runs `scripts/lint.sh` automatically before every `git push`,
+catching lint and spelling issues locally before they reach CI.
+
+```sh
+git clone https://github.com/EnjoyFX/tutorials.git
+cd tutorials
+ln -sf ../../scripts/lint.sh .git/hooks/pre-push
+```
+
+### Run lint manually
+
+```sh
+sh scripts/lint.sh
+```
+
+Required tools: `npm` (markdownlint, cspell), `python3`, `helm`.
+Optional: `shellcheck` — `brew install shellcheck`.
