@@ -11,9 +11,9 @@
 3. [Терміни — словник](#3-терміни--словник)
 4. [Робота з репозиторіями](#4-робота-з-репозиторіями)
 5. [Встановлення та оновлення релізів](#5-встановлення-та-оновлення-релізів)
-6. [Values — налаштування чартів](#6-values--налаштування-чартів)
+6. [Values — налаштування чартів](#6-values--налаштування-чартів) ✦ [антипатерни](#values--від-поганого-до-правильного)
 7. [Створення власного чарту](#7-створення-власного-чарту)
-8. [Шаблони — як це працює](#8-шаблони--як-це-працює)
+8. [Шаблони — як це працює](#8-шаблони--як-це-працює) ✦ [антипатерни](#шаблони--від-поганого-до-правильного)
 9. [Налагодження](#9-налагодження)
 10. [Helm у CI/CD](#10-helm-у-cicd)
 11. [Корисні аліаси та скрипти](#11-корисні-аліаси-та-скрипти)
@@ -303,6 +303,47 @@ secrets:
   DB_PASSWORD: ""        # передавати через --set або sealed secrets
 ```
 
+### Values — від поганого до правильного
+
+```yaml
+# ❌ Погано — плоска структура, секрет у файлі, середовище захардкоджено
+image: myapp:v1.0.0           # репозиторій і тег злиті — неможливо змінити окремо
+replicas: 1                   # немає структури, все на одному рівні
+db_password: "mysecret"       # ❌ секрет у values.yaml — потрапить у git
+prod_db_host: "prod.db.local" # середовище захардкоджено — не можна перекрити без редагування
+resources_cpu: "500m"         # замість вкладеного objects.resources → важко читати
+```
+
+```yaml
+# ✅ Добре — вкладена структура, секрет окремо, env-overrides через -f
+image:
+  repository: my-registry/myapp  # репозиторій і тег окремо — кожне можна перекрити
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+db:
+  host: "postgres-service"
+  port: 5432
+  passwordSecretRef: "app-db-secret"  # посилання на k8s Secret, не сам пароль
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# Секрет передається поза репо:
+# helm upgrade --install myapp ./myapp --set db.password=$DB_PASS
+# або через sealed-secrets / external-secrets-operator
+```
+
+> **Правило:** якщо значення різниться між dev і prod — воно має бути у values,
+> не захардкоджено у шаблоні. Якщо це секрет — його не повинно бути у values.yaml взагалі.
+
 ---
 
 ## 7. Створення власного чарту
@@ -450,6 +491,50 @@ labels:
 | `tpl` | Рендерити значення як шаблон | `{{ tpl .Values.someTemplate . }}` |
 | `trunc 63` | Обрізати рядок (для назв ресурсів) | `{{ .Release.Name \| trunc 63 }}` |
 | `{{-` / `-}}` | Прибрати пробіл / перенос рядка | |
+
+### Шаблони — від поганого до правильного
+
+```yaml
+# ❌ Погано — захардкоджені імена, дубльовані labels, ресурси не з values
+metadata:
+  name: myapp-deployment        # ❌ зламається при другому helm install або rename
+  labels:
+    app: myapp                  # ❌ вручну в deployment.yaml, service.yaml, ingress.yaml...
+    version: "1.0.0"            # ❌ захардкоджено — не оновлюється з values
+spec:
+  replicas: 2                   # ❌ не з values — не можна змінити без правки шаблону
+  template:
+    spec:
+      containers:
+        - name: myapp
+          image: myapp:latest   # ❌ не з values — CI не може змінити тег
+          resources:
+            limits:
+              memory: 128Mi     # ❌ однаково для dev і prod — не гнучко
+```
+
+```yaml
+# ✅ Добре — імена через helper, labels централізовано, все параметризовано
+metadata:
+  name: {{ include "myapp.fullname" . }}       # з _helpers.tpl — Release.Name + Chart.Name
+  labels:
+    {{- include "myapp.labels" . | nindent 4 }} # визначено один раз у _helpers.tpl
+spec:
+  replicas: {{ .Values.replicaCount }}          # з values — можна перекрити через -f або --set
+  template:
+    metadata:
+      labels:
+        {{- include "myapp.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"  # з values
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}  # повністю з values — різне для envs
+```
+
+> **Правило:** якщо рядок зустрічається у двох шаблонах — він має бути у `_helpers.tpl`.
+> Якщо значення різниться між запусками — воно має бути у `values.yaml`.
 
 ---
 

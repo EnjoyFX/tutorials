@@ -10,7 +10,7 @@
 2. [Щоденна діагностика](#2-щоденна-діагностика)
 3. [Деплой застосунків](#3-деплой-застосунків)
 4. [Робота з конфігами](#4-робота-з-конфігами)
-5. [Налагодження проблем](#5-налагодження-проблем)
+5. [Налагодження проблем](#5-налагодження-проблем) ✦ [антипатерни](#дебаг--від-хаотичного-до-системного)
 6. [Networking та Ingress](#6-networking-та-ingress)
 7. [Storage та PVC](#7-storage-та-pvc)
 8. [Секрети та ConfigMap](#8-секрети-та-configmap)
@@ -268,6 +268,45 @@ kubens     # вибір namespace через пошук
 ---
 
 ## 5. Налагодження проблем
+
+### Дебаг — від хаотичного до системного
+
+```bash
+# ❌ Погано — хаотичний дебаг, час витрачається на здогадки
+kubectl get pods                      # ❌ забули -n → дивимось не в той namespace
+# нічого не видно... починаємо гадати
+
+kubectl logs myapp                    # ❌ не повне ім'я pod → "Error from server: not found"
+
+kubectl delete pod myapp-xxx          # ❌ видалили pod поки не прочитали логи
+# pod піднявся знову з тим самим крашем, причина досі невідома
+
+kubectl get events                    # ❌ запізно — events зберігаються ~1 год, корисні вже зникли
+```
+
+```bash
+# ✅ Добре — системний підхід: від загального до конкретного
+
+# 1. Завжди вказуй namespace (або встанови дефолтний: kubens my-namespace)
+kubectl get pods -n my-namespace
+
+# 2. describe ПЕРЕД logs — Events секція покаже причину одразу
+kubectl describe pod myapp-xxx -n my-namespace
+# → Events: 0/3 nodes available (oom), ImagePullBackOff, CrashLoopBackOff — причина очевидна
+
+# 3. Логи — тільки після того як describe не дав відповіді
+kubectl logs myapp-xxx -n my-namespace
+kubectl logs myapp-xxx -n my-namespace --previous  # ❗ якщо pod вже рестартував
+
+# 4. Ніколи не видаляй pod під час дебагу — зайди всередину
+kubectl exec -it myapp-xxx -n my-namespace -- sh
+
+# 5. Якщо pod взагалі не з'являється — events по namespace
+kubectl get events -n my-namespace --sort-by='.lastTimestamp' | tail -20
+```
+
+> **Алгоритм:** `get pods` → `describe` → `logs` → `logs --previous` → `exec` → `events`.
+> Видаляти pod — тільки якщо переконався що проблему зрозумів і виправив.
 
 ### Pod не запускається — алгоритм дій
 

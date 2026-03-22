@@ -11,9 +11,9 @@
 3. [Glossary](#3-glossary)
 4. [Working with Repositories](#4-working-with-repositories)
 5. [Installing and Upgrading Releases](#5-installing-and-upgrading-releases)
-6. [Values — Configuring Charts](#6-values--configuring-charts)
+6. [Values — Configuring Charts](#6-values--configuring-charts) ✦ [anti-patterns](#values--bad-vs-right)
 7. [Creating Your Own Chart](#7-creating-your-own-chart)
-8. [Templates — How It Works](#8-templates--how-it-works)
+8. [Templates — How It Works](#8-templates--how-it-works) ✦ [anti-patterns](#templates--bad-vs-right)
 9. [Debugging](#9-debugging)
 10. [Helm in CI/CD](#10-helm-in-cicd)
 11. [Useful Aliases and Scripts](#11-useful-aliases-and-scripts)
@@ -303,6 +303,47 @@ secrets:
   DB_PASSWORD: ""        # pass via --set or sealed secrets
 ```
 
+### Values — bad vs right
+
+```yaml
+# ❌ Bad — flat structure, secret in file, env hardcoded
+image: myapp:v1.0.0           # repo and tag merged — impossible to override separately
+replicas: 1                   # no structure, everything at the top level
+db_password: "mysecret"       # ❌ secret in values.yaml — will end up in git
+prod_db_host: "prod.db.local" # env hardcoded — can't override without editing the file
+resources_cpu: "500m"         # flat key instead of nested resources object — hard to read
+```
+
+```yaml
+# ✅ Good — nested structure, secret by reference, env overrides via -f
+image:
+  repository: my-registry/myapp  # repo and tag separate — each can be overridden
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+db:
+  host: "postgres-service"
+  port: 5432
+  passwordSecretRef: "app-db-secret"  # reference to a k8s Secret, not the value itself
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# Secret is passed outside the repo:
+# helm upgrade --install myapp ./myapp --set db.password=$DB_PASS
+# or via sealed-secrets / external-secrets-operator
+```
+
+> **Rule:** if a value differs between dev and prod — it belongs in values, not hardcoded
+> in the template. If it's a secret — it should not be in values.yaml at all.
+
 ---
 
 ## 7. Creating Your Own Chart
@@ -450,6 +491,50 @@ labels:
 | `tpl` | Render a value as a template | `{{ tpl .Values.someTemplate . }}` |
 | `trunc 63` | Truncate string (for resource names) | `{{ .Release.Name \| trunc 63 }}` |
 | `{{-` / `-}}` | Strip whitespace / newline | |
+
+### Templates — bad vs right
+
+```yaml
+# ❌ Bad — hardcoded names, duplicated labels, resources not from values
+metadata:
+  name: myapp-deployment        # ❌ breaks on second helm install or rename
+  labels:
+    app: myapp                  # ❌ copy-pasted in deployment.yaml, service.yaml, ingress.yaml...
+    version: "1.0.0"            # ❌ hardcoded — won't update when values change
+spec:
+  replicas: 2                   # ❌ not from values — can't change without editing the template
+  template:
+    spec:
+      containers:
+        - name: myapp
+          image: myapp:latest   # ❌ not from values — CI can't override the tag
+          resources:
+            limits:
+              memory: 128Mi     # ❌ same for dev and prod — not flexible
+```
+
+```yaml
+# ✅ Good — names via helper, labels centralised, everything parameterised
+metadata:
+  name: {{ include "myapp.fullname" . }}        # from _helpers.tpl — Release.Name + Chart.Name
+  labels:
+    {{- include "myapp.labels" . | nindent 4 }}  # defined once in _helpers.tpl
+spec:
+  replicas: {{ .Values.replicaCount }}           # from values — override with -f or --set
+  template:
+    metadata:
+      labels:
+        {{- include "myapp.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"  # from values
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}  # fully from values — different per env
+```
+
+> **Rule:** if a string appears in two templates — it belongs in `_helpers.tpl`.
+> If a value changes between runs — it belongs in `values.yaml`.
 
 ---
 

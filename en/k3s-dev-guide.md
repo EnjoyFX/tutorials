@@ -10,7 +10,7 @@
 2. [Daily Diagnostics](#2-daily-diagnostics)
 3. [Deploying Applications](#3-deploying-applications)
 4. [Working with Configs](#4-working-with-configs)
-5. [Troubleshooting](#5-troubleshooting)
+5. [Troubleshooting](#5-troubleshooting) ✦ [anti-patterns](#debugging--chaotic-vs-systematic)
 6. [Networking and Ingress](#6-networking-and-ingress)
 7. [Storage and PVC](#7-storage-and-pvc)
 8. [Secrets and ConfigMap](#8-secrets-and-configmap)
@@ -268,6 +268,45 @@ kubens     # select namespace via search
 ---
 
 ## 5. Troubleshooting
+
+### Debugging — chaotic vs systematic
+
+```bash
+# ❌ Bad — guessing, time wasted on trial and error
+kubectl get pods                      # ❌ forgot -n → looking in the wrong namespace
+# nothing visible... start guessing
+
+kubectl logs myapp                    # ❌ not the full pod name → "Error from server: not found"
+
+kubectl delete pod myapp-xxx          # ❌ deleted the pod before reading the logs
+# pod restarted with the same crash — root cause still unknown
+
+kubectl get events                    # ❌ too late — events are kept ~1h, useful ones already gone
+```
+
+```bash
+# ✅ Good — systematic: broad to specific
+
+# 1. Always specify namespace (or set default: kubens my-namespace)
+kubectl get pods -n my-namespace
+
+# 2. describe BEFORE logs — the Events section shows the cause immediately
+kubectl describe pod myapp-xxx -n my-namespace
+# → Events: 0/3 nodes available (oom), ImagePullBackOff, CrashLoopBackOff — cause is obvious
+
+# 3. Logs — only if describe didn't give the answer
+kubectl logs myapp-xxx -n my-namespace
+kubectl logs myapp-xxx -n my-namespace --previous  # ❗ if the pod already restarted
+
+# 4. Never delete a pod while debugging — exec into it instead
+kubectl exec -it myapp-xxx -n my-namespace -- sh
+
+# 5. If the pod never appears — check namespace-wide events
+kubectl get events -n my-namespace --sort-by='.lastTimestamp' | tail -20
+```
+
+> **Flow:** `get pods` → `describe` → `logs` → `logs --previous` → `exec` → `events`.
+> Delete the pod only after you've understood and fixed the root cause.
 
 ### Pod won't start — step-by-step
 
