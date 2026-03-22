@@ -35,7 +35,7 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 
 ## Structure
 
-```
+```text
 .
 ├── en/                      # English
 │   ├── docker-guide.md
@@ -58,24 +58,40 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 
 ## Contributing
 
-### Install the pre-push hook
-
-The hook runs `scripts/lint.sh` automatically before every `git push`,
-catching lint and spelling issues locally before they reach CI.
+### Bootstrap
 
 ```sh
-git clone https://github.com/EnjoyFX/tutorials.git
-cd tutorials
-ln -sf ../../scripts/lint.sh .git/hooks/pre-push
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements-dev.txt
+```
+
+### Install Git Hooks
+
+Install `pre-commit` hooks to run lint and demo tests before each commit.
+
+```sh
+pre-commit install
 ```
 
 ### Run lint manually
 
 ```sh
-python3 -m pip install -r requirements-dev.txt
-sh scripts/lint.sh
+make lint
+```
+
+### Run tests manually
+
+```sh
+make test
+```
+
+### Run all local checks
+
+```sh
+make check
 ```
 
 Required tools: `python3`, `helm`.
-Python lint tools: `pip install -r requirements-dev.txt`
+Python dev tools: `pip install -r requirements-dev.txt`
 Optional: `shellcheck` — `brew install shellcheck`.
