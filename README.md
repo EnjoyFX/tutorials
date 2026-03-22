@@ -13,6 +13,7 @@ Each guide is written as a real-world reference — not a list of commands, but 
 | **Docker** | [en/docker-guide.md](en/docker-guide.md) | [ua/docker-guide.md](ua/docker-guide.md) |
 | **Helm** | [en/helm-guide.md](en/helm-guide.md) | [ua/helm-guide.md](ua/helm-guide.md) |
 | **k3s** | [en/k3s-dev-guide.md](en/k3s-dev-guide.md) | [ua/k3s-dev-guide.md](ua/k3s-dev-guide.md) |
+| **Demo App** (Docker → Helm → k3s) | [examples/README.md](examples/README.md) | [ua/examples-guide.md](ua/examples-guide.md) |
 
 ---
 
@@ -33,12 +34,17 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 
 ```
 .
-├── en/                  # English
+├── en/                      # English
 │   ├── docker-guide.md
 │   ├── helm-guide.md
 │   └── k3s-dev-guide.md
-└── ua/                  # Ukrainian
-    ├── docker-guide.md
-    ├── helm-guide.md
-    └── k3s-dev-guide.md
+├── ua/                      # Ukrainian
+│   ├── docker-guide.md
+│   ├── helm-guide.md
+│   ├── k3s-dev-guide.md
+│   └── examples-guide.md   # Demo app walkthrough
+└── examples/                # Runnable demo: Docker → Helm → k3s
+    ├── docker/              # Python app + Dockerfile
+    ├── helm/myapp/          # Helm chart
+    └── k3s/                 # deploy.sh
 ```

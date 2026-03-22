@@ -42,6 +42,21 @@ kubectl apply -f ./              helm install myapp ./myapp -f values-prod.yaml
 2. **Конфігурація** — одні шаблони, різні значення для dev/staging/prod.
 3. **Версіонування** — кожен деплой — це реліз з номером, можна відкотити.
 
+### Схема: чарт → рендер → реліз
+
+```mermaid
+flowchart LR
+    A["Chart\n(templates/)"] --> C
+    B["values.yaml\n(або -f override)"] --> C
+    C["helm template\n(рендер)"] --> D["Rendered YAML\nманіфести"]
+    D --> E["kubectl apply\n(через Helm)"]
+    E --> F[("Kubernetes\nAPI")]
+    F --> G["Release\n(зберігається як\nSecret у кластері)"]
+```
+
+> `helm rollback` — це просто повторний `apply` попередньої версії rendered YAML,
+> яка зберігається у Secret з назвою `sh.helm.release.v1.<name>.v<N>`.
+
 ---
 
 ## 2. Встановлення та перший запуск

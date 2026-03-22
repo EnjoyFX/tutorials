@@ -1,0 +1,22 @@
+replicaCount: 1
+
+image:
+  repository: myapp
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+env:
+  MESSAGE: "Hello from myapp!"
+  APP_VERSION: "1.0.0"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 64Mi

@@ -51,6 +51,26 @@ Disk ISO image      →    Running VM
 Recipe              →    Cooked dish
 ```
 
+### Diagram: from Dockerfile to containers
+
+```
+┌──────────────────┐  docker build  ┌────────────────────────┐
+│   Dockerfile     │ ─────────────▶ │  Image  myapp:latest   │
+│                  │                │  (read-only layers)    │
+│  FROM python...  │                └────────────┬───────────┘
+│  COPY app.py .   │                             │ docker run (×N)
+│  CMD [...]       │          ┌──────────────────┼──────────────────┐
+└──────────────────┘          ▼                  ▼                  ▼
+                        ┌──────────┐       ┌──────────┐       ┌──────────┐
+                        │Container │       │Container │       │Container │
+                        │ myapp-1  │       │ myapp-2  │       │ myapp-3  │
+                        │ fs / net │       │ fs / net │       │ fs / net │
+                        └──────────┘       └──────────┘       └──────────┘
+```
+
+> One image — unlimited containers. Each container has its own isolated
+> filesystem and network, but shares the image layers read-only (copy-on-write).
+
 ---
 
 ## 2. Images — Building and Managing

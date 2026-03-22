@@ -614,6 +614,32 @@ kubectl rollout restart deployment/myapp -n my-namespace
 
 ## 9. Multi-Node Cluster
 
+### Single-node vs Multi-node
+
+```mermaid
+flowchart TD
+    subgraph single["Single-node  (dev / local)"]
+        direction TB
+        S["k3s server\n• control plane\n• etcd\n• kubelet (worker)"]
+        S --> P1[pod] & P2[pod] & P3[pod]
+    end
+
+    subgraph multi["Multi-node  (production)"]
+        direction TB
+        M["k3s server\n(control plane)"]
+        W1["worker node 1\n(k3s agent)"]
+        W2["worker node 2\n(k3s agent)"]
+        M -->|"K3S_URL\nK3S_TOKEN"| W1
+        M -->|"K3S_URL\nK3S_TOKEN"| W2
+        W1 --> P4[pod] & P5[pod]
+        W2 --> P6[pod] & P7[pod]
+    end
+```
+
+> In single-node mode the server is both control plane and worker.
+> In multi-node, each worker runs only `k3s agent` — it connects to the server
+> via `K3S_URL` and authenticates with `K3S_TOKEN`.
+
 ### Add a worker node
 
 ```bash
