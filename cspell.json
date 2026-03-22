@@ -2,7 +2,7 @@
   "version": "0.2",
   "language": "en",
   "words": [
-    "myapp", "appuser", "nodename",
+    "myapp", "appuser", "nodename", "Dockerfiles",
     "kubectl", "kubeconfig", "kubelet", "kubens", "kubectx",
     "k3s", "k3d", "kube", "crictl", "containerd", "etcd",
     "helmfile", "nindent", "toYaml", "trimSuffix",
