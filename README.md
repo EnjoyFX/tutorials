@@ -14,6 +14,7 @@ Each guide is written as a real-world reference — not a list of commands, but 
 | **Helm** | [en/helm-guide.md](en/helm-guide.md) | [ua/helm-guide.md](ua/helm-guide.md) |
 | **k3s** | [en/k3s-dev-guide.md](en/k3s-dev-guide.md) | [ua/k3s-dev-guide.md](ua/k3s-dev-guide.md) |
 | **Demo App** (Docker → Helm → k3s) | [examples/README.md](examples/README.md) | [ua/examples-guide.md](ua/examples-guide.md) |
+| **Compose → Helm migration** | [en/compose-to-helm.md](en/compose-to-helm.md) | [ua/compose-to-helm.md](ua/compose-to-helm.md) |
 
 ---
 
