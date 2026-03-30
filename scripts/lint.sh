@@ -44,6 +44,7 @@ echo "────────────────────────�
 run     "markdown lint"      pymarkdownlnt --config .pymarkdown.json scan .
 run     "spellcheck (EN)"    codespell --config .codespellrc en README.md examples
 run     "python syntax"      python3 -m py_compile examples/docker/app.py
+run     "pytest"             pytest tests/ -q
 run     "shellcheck"         shellcheck examples/k3s/deploy.sh
 run     "helm lint"          helm lint examples/helm/myapp
 

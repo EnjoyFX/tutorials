@@ -1,6 +1,6 @@
 # Tutorials
 
-Practical developer guides for the modern container stack: Docker, Helm, and k3s.
+Practical developer guides for Linux and the modern container stack: Docker, Helm, and k3s.
 
 Each guide is written as a real-world reference — not a list of commands, but a day-to-day companion that explains *what* things are, *why* they work the way they do, and *how* to use them effectively in real scenarios.
 
@@ -11,6 +11,7 @@ Each guide is written as a real-world reference — not a list of commands, but 
 | Guide | English | Ukrainian |
 |---|---|---|
 | **Docker** | [en/docker-guide.md](en/docker-guide.md) | [ua/docker-guide.md](ua/docker-guide.md) |
+| **Linux** | [en/linux-guide.md](en/linux-guide.md) | [ua/linux-guide.md](ua/linux-guide.md) |
 | **Helm** | [en/helm-guide.md](en/helm-guide.md) | [ua/helm-guide.md](ua/helm-guide.md) |
 | **k3s** | [en/k3s-dev-guide.md](en/k3s-dev-guide.md) | [ua/k3s-dev-guide.md](ua/k3s-dev-guide.md) |
 | **Demo App** (Docker → Helm → k3s) | [examples/README.md](examples/README.md) | [ua/examples-guide.md](ua/examples-guide.md) |
@@ -23,6 +24,10 @@ Each guide is written as a real-world reference — not a list of commands, but 
 ### Docker
 
 Covers the full day-to-day workflow: building images, writing good Dockerfiles (with a "bad vs right" comparison), multi-stage builds, container management, debugging techniques, volumes, networking, Docker Compose for local development, publishing to registries, and CI/CD integration.
+
+### Linux
+
+Daily Linux operations for developers and DevOps work: filesystem navigation, permissions and ownership, processes and ports, service management with systemd, package installation, logs and diagnostics, disk cleanup, networking checks, and SSH/curl/tar workflows.
 
 ### Helm
 
@@ -41,10 +46,12 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 ├── en/                      # English
 │   ├── docker-guide.md
 │   ├── helm-guide.md
+│   ├── linux-guide.md
 │   └── k3s-dev-guide.md
 ├── ua/                      # Ukrainian
 │   ├── docker-guide.md
 │   ├── helm-guide.md
+│   ├── linux-guide.md
 │   ├── k3s-dev-guide.md
 │   └── examples-guide.md   # Demo app walkthrough
 ├── examples/                # Runnable demo: Docker → Helm → k3s
