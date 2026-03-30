@@ -37,6 +37,14 @@ The Kubernetes package manager from the ground up: core concepts, working with r
 
 Lightweight Kubernetes in practice: installation, daily cluster diagnostics, deploying and rolling back applications, namespace and context management with kubectx/kubens, troubleshooting CrashLoopBackOff and ImagePullBackOff, Traefik Ingress, persistent storage with PVC, secrets management, and multi-node cluster operations.
 
+### Demo App
+
+A minimal end-to-end example — Python HTTP server built into a Docker image, packaged as a Helm chart, and deployed on k3s. Includes liveness/readiness probes, non-root Dockerfile, and a one-command deploy script.
+
+### Compose → Helm Migration
+
+Step-by-step guide for taking a `compose.yaml` and turning it into a Helm chart: concept mapping table, handling `build:`, `depends_on:`, secrets, named volumes, and what `kompose` does and doesn't do for you.
+
 ---
 
 ## Structure
@@ -45,21 +53,26 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 .
 ├── en/                      # English
 │   ├── docker-guide.md
-│   ├── helm-guide.md
 │   ├── linux-guide.md
-│   └── k3s-dev-guide.md
+│   ├── helm-guide.md
+│   ├── k3s-dev-guide.md
+│   └── compose-to-helm.md
 ├── ua/                      # Ukrainian
 │   ├── docker-guide.md
-│   ├── helm-guide.md
 │   ├── linux-guide.md
+│   ├── helm-guide.md
 │   ├── k3s-dev-guide.md
-│   └── examples-guide.md   # Demo app walkthrough
+│   ├── compose-to-helm.md
+│   └── examples-guide.md
 ├── examples/                # Runnable demo: Docker → Helm → k3s
 │   ├── docker/              # Python app + Dockerfile
 │   ├── helm/myapp/          # Helm chart
 │   └── k3s/                 # deploy.sh
-└── scripts/
-    └── lint.sh              # Local lint (PyMarkdownLnt + codespell + helm lint + ...)
+├── tests/
+│   └── test_app.py          # pytest tests for the demo app
+├── scripts/
+│   └── lint.sh              # lint runner (markdownlint + codespell + helm + shellcheck)
+└── Makefile                 # make install / lint / test / check / hooks
 ```
 
 ---
