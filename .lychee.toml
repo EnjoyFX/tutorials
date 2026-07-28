@@ -10,7 +10,7 @@ exclude = [
 ]
 
 # Don't fail on anchors (GitHub renders them differently)
-include_fragments = false
+include_fragments = "none"
 
 # Retry on timeout
 max_retries = 3
