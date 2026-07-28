@@ -739,6 +739,38 @@ kubectl edit pvc myapp-data -n my-namespace
 
 ## 9. Secrets and ConfigMap
 
+### You don't know the name? Discovery first
+
+Commands below assume you know the ConfigMap/Secret name. In someone else's
+cluster you usually don't — so start from what exists and what the app
+actually uses:
+
+```bash
+# What is there in the namespace?
+kubectl get configmap,secret -n my-namespace
+
+# Search across all namespaces (where does it live?)
+kubectl get configmap -A | grep -i app
+
+# Which ConfigMaps/Secrets does the deployment actually reference?
+kubectl get deployment myapp -n my-namespace -o yaml \
+  | grep -B1 -A2 -E 'configMapRef|secretRef|configMapKeyRef|secretKeyRef'
+
+# Mounted as volumes — names straight from the pod spec
+kubectl get pod <pod> -n my-namespace -o jsonpath='{.spec.volumes[*].configMap.name}'
+kubectl get pod <pod> -n my-namespace -o jsonpath='{.spec.volumes[*].secret.secretName}'
+
+# Peek at the keys without dumping the values
+kubectl describe configmap app-config -n my-namespace
+
+# Decode ALL keys of a secret at once
+kubectl get secret app-secrets -n my-namespace \
+  -o go-template='{{range $k,$v := .data}}{{$k}}={{$v | base64decode}}{{"\n"}}{{end}}'
+```
+
+> **Note:** `kubectl get secret` also lists `sh.helm.release.v1.*` entries —
+> that's Helm's internal release storage, not your application secrets.
+
 ### ConfigMap
 
 ```bash
