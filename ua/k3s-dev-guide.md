@@ -493,6 +493,25 @@ kubectl port-forward -n kube-system \
 # Відкрити: http://localhost:9000/dashboard/
 ```
 
+### Ingress віддає 404/502? Пройди ланцюжок
+
+Ingress — лише верхівка ланцюжка: Ingress → Service → Endpoints → Pods.
+Спускайся вниз, поки не знайдеш розірвану ланку:
+
+```bash
+# На який сервіс насправді маршрутизує цей ingress?
+kubectl describe ingress myapp-ingress -n my-namespace
+# → Backends: myapp-service:8080 (10.42.0.15:8080,...) — порожній список = розрив нижче
+
+# А чи є за сервісом pod-и?
+kubectl get endpoints myapp-service -n my-namespace
+# ENDPOINTS <none> — класика: селектор сервісу не збігається з label-ами pod-ів
+
+# Порівняти селектор з реальними label-ами pod-ів
+kubectl get service myapp-service -n my-namespace -o jsonpath='{.spec.selector}'
+kubectl get pods -n my-namespace --show-labels
+```
+
 ### TLS / HTTPS
 
 **Ручний шлях** — сертифікат уже є (куплений або від внутрішнього CA):
@@ -668,8 +687,12 @@ kubectl get pvc -n my-namespace
 # STATUS: Pending — PV ще не знайдено / не створено (перевірити events)
 # STATUS: Lost    — PV був видалений, дані можливо втрачені
 
-# Детальний опис PVC (показує до якого PV прив'язаний)
+# Детальний опис PVC (показує прив'язаний PV і Used By: — який pod тримає claim)
 kubectl describe pvc myapp-data -n my-namespace
+
+# У зворотний бік: який PVC монтує кожен pod у namespace?
+kubectl get pods -n my-namespace \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.volumes[*].persistentVolumeClaim.claimName}{"\n"}{end}'
 
 # Переглянути PV (cluster-wide, без -n)
 kubectl get pv
@@ -827,6 +850,21 @@ kubectl rollout restart deployment/myapp -n my-namespace
 ---
 
 ## 10. Основи RBAC
+
+### Що тут уже дозволено? Спершу discovery
+
+Перш ніж писати новий Role, подивись, що вже існує і що може поточний користувач:
+
+```bash
+# Повний список моїх прав у namespace
+kubectl auth can-i --list -n myns
+
+# Той самий список для ServiceAccount
+kubectl auth can-i --list --as=system:serviceaccount:myns:ci-deployer -n myns
+
+# Які Role та binding-и вже є в namespace?
+kubectl get roles,rolebindings -n myns
+```
 
 ### Сценарій: CI-пайплайн деплоїть в один namespace і більше нікуди
 

@@ -703,6 +703,27 @@ helm lint ./myapp -f values-prod.yaml
 # - resource без namespace
 ```
 
+### Ресурс у кластері — який реліз ним володіє?
+
+Зворотний бік `helm list`: ти знайшов Deployment (або Service, ConfigMap...)
+і хочеш дізнатися, який Helm-реліз ним керує — і чи керує ним Helm взагалі.
+Helm 3 позначає кожен ресурс, який створює:
+
+```bash
+# Чи це взагалі Helm? ("Helm" — так; порожньо — створено поза Helm)
+kubectl get deployment myapp -n my-namespace \
+  -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}'
+
+# Який реліз володіє ресурсом — і в якому namespace живе цей реліз
+kubectl get deployment myapp -n my-namespace \
+  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
+kubectl get deployment myapp -n my-namespace \
+  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}'
+
+# Тепер — усе інше, чим володіє цей реліз
+helm get manifest <release> -n <namespace>
+```
+
 ### Переглянути що задеплоєно
 
 ```bash

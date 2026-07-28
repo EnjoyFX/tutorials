@@ -348,6 +348,25 @@ sudo firewall-cmd --reload
 
 Більшість сучасних Linux-дистрибутивів використовують `systemd`.
 
+### Не знаєте назви юніта? Спершу discovery
+
+Команди нижче припускають, що назва юніта відома. На незнайомому сервері
+зазвичай це не так — тому почніть з того, що реально запущено (або впало):
+
+```bash
+# Які сервіси запущені прямо зараз?
+systemctl list-units --type=service --state=running
+
+# Які сервіси впали?
+systemctl list-units --type=service --state=failed
+
+# Чи він взагалі встановлений / увімкнений? (показує й неактивні unit-файли)
+systemctl list-unit-files | grep -i nginx
+
+# У вас лише PID (з ps / ss) — який юніт ним володіє?
+systemctl status 1234
+```
+
 ### Основні команди
 
 ```bash
@@ -425,6 +444,14 @@ crontab -e
 
 # Показати встановлені cron-записи
 crontab -l
+
+# Не лише ваші: у яких користувачів на цій машині є crontab?
+sudo ls /var/spool/cron/crontabs/   # Debian/Ubuntu
+sudo ls /var/spool/cron/            # RHEL-подібні
+sudo crontab -l -u deploy           # прочитати crontab конкретного користувача
+
+# Системні задачі живуть узагалі поза користувацькими crontab
+ls /etc/cron.d/ /etc/cron.daily/ /etc/cron.hourly/
 ```
 
 Синтаксис із 5 полів:
@@ -543,6 +570,27 @@ sudo apk del nginx
 sudo apk update
 ```
 
+### Зворотний пошук — який пакет стоїть за цим файлом?
+
+Бінарник або конфіг лежить на диску, і треба зрозуміти, звідки він узявся,
+або чи встановлений пакет узагалі:
+
+```bash
+# Який пакет володіє цим файлом?
+dpkg -S /usr/sbin/nginx               # Debian/Ubuntu
+rpm -qf /usr/sbin/nginx               # RHEL-подібні
+apk info --who-owns /usr/sbin/nginx   # Alpine
+
+# Чи встановлений пакет узагалі? (Debian: apt list --installed вище)
+rpm -qa | grep -i nginx
+apk info | grep -i nginx
+
+# Які файли встановив пакет? (конфіги, бінарники, юніти)
+dpkg -L nginx
+rpm -ql nginx
+apk info -L nginx
+```
+
 ### Перевірити шлях до binary
 
 ```bash
@@ -571,6 +619,8 @@ sudo install -m 0755 ./kubectl /usr/local/bin/kubectl
 journalctl -xe
 journalctl -b              # поточне завантаження
 journalctl -b -1           # попереднє завантаження
+
+# Не знаєте назви юніта? Спершу discovery — див. розділ 6 (systemctl list-units)
 journalctl -u nginx -n 100
 journalctl -u nginx -f
 ```
@@ -578,6 +628,9 @@ journalctl -u nginx -f
 ### Класичні log-файли
 
 ```bash
+# У який log-файл реально пише запущений сервіс? (PID з ps / systemctl status)
+sudo lsof -p 1234 | grep -i log
+
 ls /var/log
 tail -f /var/log/syslog
 tail -f /var/log/messages

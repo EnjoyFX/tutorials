@@ -458,6 +458,9 @@ helm upgrade --install "$RELEASE" "$CHART" \
 ### Перевірка після деплою
 
 ```bash
+# Який реліз створив deploy.sh?
+helm list -n demo
+
 # Статус pod
 kubectl get pods -n demo
 

@@ -493,6 +493,25 @@ kubectl port-forward -n kube-system \
 # Open: http://localhost:9000/dashboard/
 ```
 
+### Ingress returns 404/502? Trace the chain
+
+An Ingress is only the top of a chain: Ingress → Service → Endpoints → Pods.
+Walk it downward until you find the broken link:
+
+```bash
+# Which service does this ingress actually route to?
+kubectl describe ingress myapp-ingress -n my-namespace
+# → Backends: myapp-service:8080 (10.42.0.15:8080,...) — empty list = the break is below
+
+# Does the service have pods behind it?
+kubectl get endpoints myapp-service -n my-namespace
+# ENDPOINTS <none> — classic: the service selector doesn't match the pod labels
+
+# Compare the selector with the actual pod labels
+kubectl get service myapp-service -n my-namespace -o jsonpath='{.spec.selector}'
+kubectl get pods -n my-namespace --show-labels
+```
+
 ### TLS / HTTPS
 
 **Manual path** — you already have a certificate (bought, or from an internal CA):
@@ -667,8 +686,12 @@ kubectl get pvc -n my-namespace
 # STATUS: Pending — PV not found / not created yet (check events)
 # STATUS: Lost    — PV was deleted, data may be gone
 
-# Detailed PVC description (shows which PV it's bound to)
+# Detailed PVC description (shows the bound PV and Used By: — which pod holds the claim)
 kubectl describe pvc myapp-data -n my-namespace
+
+# The other direction: which PVC does each pod in the namespace mount?
+kubectl get pods -n my-namespace \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.volumes[*].persistentVolumeClaim.claimName}{"\n"}{end}'
 
 # View PVs (cluster-wide, no -n)
 kubectl get pv
@@ -826,6 +849,21 @@ kubectl rollout restart deployment/myapp -n my-namespace
 ---
 
 ## 10. RBAC Basics
+
+### What's already allowed here? Discovery first
+
+Before writing a new Role, check what exists and what the current user can do:
+
+```bash
+# Full list of my permissions in the namespace
+kubectl auth can-i --list -n myns
+
+# The same list for a ServiceAccount
+kubectl auth can-i --list --as=system:serviceaccount:myns:ci-deployer -n myns
+
+# Which Roles and bindings already exist in the namespace?
+kubectl get roles,rolebindings -n myns
+```
 
 ### Scenario: a CI pipeline deploys to one namespace and nothing else
 

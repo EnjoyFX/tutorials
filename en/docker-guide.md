@@ -397,6 +397,26 @@ docker rm -f myapp    # stop and remove in one step
 
 ## 5. Debugging Containers
 
+### You don't know the container name? Discovery first
+
+Commands below assume you know the container name. On someone else's machine
+you usually don't — start from `docker ps` and narrow down:
+
+```bash
+# Who owns this port?
+docker ps --filter publish=8080
+
+# Which container just died?
+docker ps -a --latest
+docker ps --filter status=exited
+
+# All containers started from a given image
+docker ps -a --filter ancestor=myapp:latest
+
+# Name → image → status at a glance
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+```
+
 ### Logs
 
 ```bash
@@ -516,6 +536,12 @@ docker volume ls
 
 # Details (physical location on disk)
 docker volume inspect mydata
+
+# Which containers use this volume?
+docker ps -a --filter volume=mydata
+
+# Orphaned volumes (not attached to any container)
+docker volume ls -f dangling=true
 
 # Use volume when running a container
 docker run -d \
@@ -714,6 +740,9 @@ docker compose down -v
 
 # Service status
 docker compose ps
+
+# All Compose projects on this machine (works from any directory)
+docker compose ls
 
 # Logs from all services
 docker compose logs -f

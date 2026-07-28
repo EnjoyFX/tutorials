@@ -397,6 +397,26 @@ docker rm -f myapp    # зупинити і видалити одразу
 
 ## 5. Налагодження контейнерів
 
+### Не знаєш імені контейнера? Спершу discovery
+
+Команди нижче припускають, що ім'я контейнера відоме. На чужій машині його
+зазвичай не знаєш — почни з `docker ps` і звужуй пошук:
+
+```bash
+# Хто зайняв цей порт?
+docker ps --filter publish=8080
+
+# Який контейнер щойно впав?
+docker ps -a --latest
+docker ps --filter status=exited
+
+# Всі контейнери, запущені з певного образу
+docker ps -a --filter ancestor=myapp:latest
+
+# Ім'я → образ → статус одним поглядом
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+```
+
 ### Логи
 
 ```bash
@@ -516,6 +536,12 @@ docker volume ls
 
 # Деталі (де фізично на диску)
 docker volume inspect mydata
+
+# Які контейнери використовують цей volume?
+docker ps -a --filter volume=mydata
+
+# Осиротілі volumes (не прив'язані до жодного контейнера)
+docker volume ls -f dangling=true
 
 # Використати volume при запуску
 docker run -d \
@@ -714,6 +740,9 @@ docker compose down -v
 
 # Статус сервісів
 docker compose ps
+
+# Всі Compose-проєкти на цій машині (працює з будь-якої директорії)
+docker compose ls
 
 # Логи всіх сервісів
 docker compose logs -f

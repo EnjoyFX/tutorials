@@ -348,6 +348,25 @@ sudo firewall-cmd --reload
 
 Most modern Linux distributions use `systemd`.
 
+### You don't know the unit name? Discovery first
+
+The commands below assume you know the unit name. On an unfamiliar server you
+usually don't — so start from what actually runs (or has failed):
+
+```bash
+# Which services are running right now?
+systemctl list-units --type=service --state=running
+
+# Which services have failed?
+systemctl list-units --type=service --state=failed
+
+# Is it installed / enabled at all? (also lists inactive unit files)
+systemctl list-unit-files | grep -i nginx
+
+# You only have a PID (from ps / ss) — which unit owns it?
+systemctl status 1234
+```
+
 ### Main commands
 
 ```bash
@@ -425,6 +444,14 @@ crontab -e
 
 # List installed cron entries
 crontab -l
+
+# Not just yours: which users have crontabs on this machine?
+sudo ls /var/spool/cron/crontabs/   # Debian/Ubuntu
+sudo ls /var/spool/cron/            # RHEL-like
+sudo crontab -l -u deploy           # read a specific user's crontab
+
+# System-wide jobs live outside user crontabs entirely
+ls /etc/cron.d/ /etc/cron.daily/ /etc/cron.hourly/
 ```
 
 The 5-field syntax:
@@ -543,6 +570,27 @@ sudo apk del nginx
 sudo apk update
 ```
 
+### Reverse lookup — which package is behind this file?
+
+A binary or config sits on disk and you need to know where it came from,
+or whether a package is present at all:
+
+```bash
+# Which package owns this file?
+dpkg -S /usr/sbin/nginx               # Debian/Ubuntu
+rpm -qf /usr/sbin/nginx               # RHEL-like
+apk info --who-owns /usr/sbin/nginx   # Alpine
+
+# Is the package installed at all? (Debian: apt list --installed above)
+rpm -qa | grep -i nginx
+apk info | grep -i nginx
+
+# What files did the package install? (configs, binaries, units)
+dpkg -L nginx
+rpm -ql nginx
+apk info -L nginx
+```
+
 ### Verify executable path
 
 ```bash
@@ -571,6 +619,8 @@ sudo install -m 0755 ./kubectl /usr/local/bin/kubectl
 journalctl -xe
 journalctl -b              # current boot
 journalctl -b -1           # previous boot
+
+# Unit name unknown? Discovery first — see section 6 (systemctl list-units)
 journalctl -u nginx -n 100
 journalctl -u nginx -f
 ```
@@ -578,6 +628,9 @@ journalctl -u nginx -f
 ### Traditional log files
 
 ```bash
+# Which log file does a running service actually write? (PID from ps / systemctl status)
+sudo lsof -p 1234 | grep -i log
+
 ls /var/log
 tail -f /var/log/syslog
 tail -f /var/log/messages

@@ -703,6 +703,27 @@ helm lint ./myapp -f values-prod.yaml
 # - resource missing namespace
 ```
 
+### A resource in the cluster — which release owns it?
+
+The reverse of `helm list`: you found a Deployment (or Service, ConfigMap...)
+and want to know which Helm release manages it — or whether it is
+Helm-managed at all. Helm 3 stamps every resource it creates:
+
+```bash
+# Helm-managed at all? ("Helm" — yes; empty — created outside Helm)
+kubectl get deployment myapp -n my-namespace \
+  -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}'
+
+# Which release owns it — and in which namespace that release lives
+kubectl get deployment myapp -n my-namespace \
+  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
+kubectl get deployment myapp -n my-namespace \
+  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-namespace}'
+
+# Now see everything else that release owns
+helm get manifest <release> -n <namespace>
+```
+
 ### Inspect what's deployed
 
 ```bash

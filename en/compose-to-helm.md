@@ -475,7 +475,8 @@ helm upgrade --install myapp ./myapp \
   --namespace demo --create-namespace \
   --wait
 
-# Verify
+# Verify — the release is there, and what did it create?
+helm list -n demo
 kubectl get all -n demo
 kubectl port-forward service/app-service 8080:8080 -n demo
 ```
@@ -507,6 +508,9 @@ brew install kompose
 
 # Convert
 kompose convert -f compose.yaml -o ./k8s-manifests/
+
+# See what was generated before applying anything
+ls ./k8s-manifests/
 
 # Or apply directly
 kompose up
