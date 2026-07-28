@@ -1,0 +1,18 @@
+[project]
+name = "k3s-learn"
+version = "0.1.0"
+requires-python = ">=3.12,<3.14"
+
+[dependency-groups]
+dev = [
+    "pymarkdownlnt~=0.9",
+    "codespell~=2.4",
+    "pre-commit~=4.3",
+    "pytest~=8.4",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["examples/docker"]

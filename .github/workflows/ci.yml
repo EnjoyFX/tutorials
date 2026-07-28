@@ -13,11 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
-      - run: pip install -r requirements-dev.txt
-      - run: pymarkdownlnt --config .pymarkdown.json scan .
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pymarkdownlnt --config .pymarkdown.json scan .
 
   links-check:
     name: Links check
@@ -34,27 +34,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
-      - run: pip install -r requirements-dev.txt
-      - run: codespell --config .codespellrc en README.md examples
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run codespell --config .codespellrc en README.md examples
 
   syntax-check:
     name: Syntax check (examples)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
-      - run: pip install -r requirements-dev.txt
+          enable-cache: true
+      - run: uv sync --frozen
 
       - name: Python — py_compile
-        run: python3 -m py_compile examples/docker/app.py
+        run: uv run python -m py_compile examples/docker/app.py
 
       - name: Python — pytest
-        run: pytest
+        run: uv run pytest
+
+      - name: Docker — build
+        run: docker build -t myapp:ci examples/docker
 
       - name: Dockerfile — hadolint
         uses: hadolint/hadolint-action@v3.1.0
@@ -69,3 +72,17 @@ jobs:
       - name: Helm — helm lint
         uses: azure/setup-helm@v4
       - run: helm lint examples/helm/myapp
+      - run: helm template myapp examples/helm/myapp --namespace demo
+
+      - name: Docker — smoke test
+        run: |
+          docker run --rm -d --name myapp-ci -p 8080:8080 myapp:ci
+          trap 'docker rm -f myapp-ci >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:8080/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs myapp-ci
+          exit 1

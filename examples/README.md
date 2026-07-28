@@ -14,6 +14,7 @@ examples/
 ├── helm/
 │   └── myapp/       # Helm chart (Deployment + Service)
 │       ├── Chart.yaml
+│       ├── values.schema.json
 │       ├── values.yaml
 │       └── templates/
 │           ├── _helpers.tpl
@@ -29,8 +30,8 @@ examples/
 
 ```sh
 cd examples/docker
-docker build -t myapp:latest .
-docker run --rm -p 8080:8080 myapp:latest
+docker build -t myapp:local .
+docker run --rm -p 8080:8080 myapp:local
 
 curl http://localhost:8080/
 curl http://localhost:8080/health
@@ -41,31 +42,32 @@ curl http://localhost:8080/health
 First, build the image and load it into the cluster:
 
 ```sh
-docker build -t myapp:latest examples/docker/
+docker build -t myapp:local examples/docker/
 ```
 
 **k3s** — uses containerd directly, Docker daemon is separate; image must be piped in via stdin:
 
 ```sh
-docker save myapp:latest | sudo k3s ctr images import -
+docker save myapp:local | sudo k3s ctr images import -
 ```
 
 **k3d** — k3s running inside Docker containers; has a built-in import command that copies the image into the cluster's Docker network:
 
 ```sh
-k3d image import myapp:latest -c <cluster-name>
+k3d image import myapp:local -c <cluster-name>
 ```
 
 **kind** — Kubernetes nodes run as Docker containers; image is loaded directly from the local Docker daemon:
 
 ```sh
-kind load docker-image myapp:latest --name <cluster-name>
+kind load docker-image myapp:local --name <cluster-name>
 ```
 
 Then deploy:
 
 ```sh
 helm upgrade --install myapp examples/helm/myapp \
+  --set image.tag=local \
   --set image.pullPolicy=Never \
   --create-namespace --namespace demo --wait
 

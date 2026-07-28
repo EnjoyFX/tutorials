@@ -71,7 +71,9 @@ Step-by-step guide for taking a `compose.yaml` and turning it into a Helm chart:
 ├── tests/
 │   └── test_app.py          # pytest tests for the demo app
 ├── scripts/
-│   └── lint.sh              # lint runner (markdownlint + codespell + helm + shellcheck)
+│   └── lint.sh              # lint runner (markdownlint + codespell + helm + optional smoke checks)
+├── pyproject.toml           # Python dev tooling dependencies
+├── uv.lock                  # Locked Python dev tooling versions
 └── Makefile                 # make install / lint / test / check / hooks
 ```
 
@@ -82,9 +84,7 @@ Step-by-step guide for taking a `compose.yaml` and turning it into a Helm chart:
 ### Bootstrap
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements-dev.txt
+uv sync
 ```
 
 ### Install Git Hooks
@@ -113,6 +113,5 @@ make test
 make check
 ```
 
-Required tools: `python3`, `helm`.
-Python dev tools: `pip install -r requirements-dev.txt`
-Optional: `shellcheck` — `brew install shellcheck`.
+Required tools: `uv`, `python3`, `helm`.
+Optional local checks: `shellcheck`, `hadolint`, `lychee`, `docker`.

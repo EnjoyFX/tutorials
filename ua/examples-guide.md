@@ -151,10 +151,10 @@ CMD ["python", "app.py"]
 cd examples/docker
 
 # Зібрати образ
-docker build -t myapp:latest .
+docker build -t myapp:local .
 
 # Запустити локально
-docker run --rm -p 8080:8080 myapp:latest
+docker run --rm -p 8080:8080 myapp:local
 
 # Перевірити
 curl http://localhost:8080/
@@ -164,7 +164,7 @@ curl http://localhost:8080/health
 docker run --rm -p 8080:8080 \
   -e MESSAGE="Привіт з Docker!" \
   -e APP_VERSION="2.0.0" \
-  myapp:latest
+  myapp:local
 ```
 
 ### .dockerignore
@@ -200,7 +200,7 @@ appVersion: "1.0.0"
 ```yaml
 image:
   repository: myapp
-  tag: latest
+  tag: "1.0.0"
   pullPolicy: IfNotPresent   # не тягти образ якщо він вже є на ноді
 
 env:
@@ -242,12 +242,14 @@ readinessProbe:
   periodSeconds: 5
 ```
 
-**securityContext** — підтверджує на рівні Kubernetes що процес не root:
+**securityContext** — підтверджує на рівні Kubernetes що процес не root і працює з обмеженими правами:
 
 ```yaml
 securityContext:
   runAsNonRoot: true
   runAsUser: 1001
+  seccompProfile:
+    type: RuntimeDefault
 ```
 
 **Змінні середовища з values.yaml:**
@@ -301,12 +303,12 @@ helm uninstall myapp -n demo
 
 ### Проблема: образ на локальній машині, не в registry
 
-k3s використовує `containerd` як runtime і не має доступу до Docker daemon. Якщо запустити `helm install` з `image: myapp:latest` — k3s спробує тягнути образ з Docker Hub і отримає `ImagePullBackOff`.
+k3s використовує `containerd` як runtime і не має доступу до Docker daemon. Якщо запустити `helm install` з образом, якого немає в containerd, k3s спробує тягнути його з registry і може отримати `ImagePullBackOff`.
 
 **Рішення** — імпортувати образ напряму в containerd:
 
 ```bash
-docker save myapp:latest | sudo k3s ctr images import -
+docker save myapp:local | sudo k3s ctr images import -
 ```
 
 - `docker save` — зберігає образ у tar-архів у stdout
@@ -327,7 +329,7 @@ set -e   # зупинитись при першій помилці
 
 ```sh
 # Збираємо образ з Dockerfile у examples/docker/
-docker build -t "$IMAGE" "$(dirname "$0")/../docker"
+docker build -t "$IMAGE" "$SCRIPT_DIR/../docker"
 ```
 
 ```sh
@@ -346,9 +348,15 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 # якщо release не існує — install, якщо існує — upgrade
 helm upgrade --install "$RELEASE" "$CHART" \
   --namespace "$NAMESPACE" \
-  --set image.pullPolicy=Never \  # не тягнути з registry
-  --wait                          # чекати поки pod стане Ready
+  --set image.repository="$IMAGE_REPOSITORY" \
+  --set image.tag="$IMAGE_TAG" \
+  --set image.pullPolicy=Never \
+  --atomic \
+  --timeout "$TIMEOUT" \
+  --wait
 ```
+
+`image.pullPolicy=Never` не тягне образ з registry, а `--wait` чекає поки pod стане Ready.
 
 ### Перевірка після деплою
 
@@ -385,8 +393,8 @@ curl http://localhost:8080/health
 cd examples
 
 # --- Крок 1: перевірити локально через Docker ---
-docker build -t myapp:latest docker/
-docker run --rm -p 8080:8080 myapp:latest &
+docker build -t myapp:local docker/
+docker run --rm -p 8080:8080 myapp:local &
 curl http://localhost:8080/
 kill %1
 

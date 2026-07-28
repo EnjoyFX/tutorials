@@ -1,4 +1,0 @@
-pymarkdownlnt~=0.9
-codespell~=2.4
-pre-commit~=4.3
-pytest~=8.4

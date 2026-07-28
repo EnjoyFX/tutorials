@@ -8,6 +8,6 @@ repos:
         pass_filenames: false
       - id: demo-tests
         name: Demo app tests
-        entry: pytest tests/test_app.py
+        entry: env UV_CACHE_DIR=.uv-cache uv run pytest tests/test_app.py
         language: system
         pass_filenames: false
