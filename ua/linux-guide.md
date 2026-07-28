@@ -2,6 +2,8 @@
 
 > Не просто команди. Сценарії реального щоденного використання.
 
+> **Дивись також:** [Docker](docker-guide.md) · [Helm](helm-guide.md) · [k3s](k3s-dev-guide.md) · [Compose → Helm](compose-to-helm.md) · [Розбір демо](examples-guide.md) · [Демо-приклад](../examples/README.md)
+
 ---
 
 ## Зміст
@@ -12,12 +14,13 @@
 4. [Процеси та фонові задачі](#4-процеси-та-фонові-задачі)
 5. [Networking і перевірка з'єднання](#5-networking-і-перевірка-зєднання)
 6. [systemd та керування сервісами](#6-systemd-та-керування-сервісами)
-7. [Пакети та встановлення софту](#7-пакети-та-встановлення-софту)
-8. [Логи та діагностика](#8-логи-та-діагностика)
-9. [Дисковий простір та очищення](#9-дисковий-простір-та-очищення)
-10. [SSH, curl, tar та інші щоденні інструменти](#10-ssh-curl-tar-та-інші-щоденні-інструменти)
-11. [Дебаг — від хаотичного до системного](#11-дебаг--від-хаотичного-до-системного)
-12. [Корисні аліаси та скрипти](#12-корисні-аліаси-та-скрипти)
+7. [Заплановані задачі — cron та systemd timers](#7-заплановані-задачі--cron-та-systemd-timers)
+8. [Пакети та встановлення софту](#8-пакети-та-встановлення-софту)
+9. [Логи та діагностика](#9-логи-та-діагностика)
+10. [Дисковий простір та очищення](#10-дисковий-простір-та-очищення)
+11. [SSH, curl, tar та інші щоденні інструменти](#11-ssh-curl-tar-та-інші-щоденні-інструменти)
+12. [Дебаг — від хаотичного до системного](#12-дебаг--від-хаотичного-до-системного)
+13. [Корисні аліаси та скрипти](#13-корисні-аліаси-та-скрипти)
 
 ---
 
@@ -294,7 +297,7 @@ ip route
 # DNS-резолв
 getent hosts example.com
 dig example.com
-nslookup example.com
+nslookup example.com   # legacy — краще dig, він показує більше деталей
 
 # Перевірити з'єднання
 ping 8.8.8.8
@@ -322,7 +325,7 @@ curl -H "Authorization: Bearer $TOKEN" https://api.example.com/me
 
 ```bash
 nc -vz example.com 443
-telnet example.com 443
+telnet example.com 443   # legacy — краще nc -vz або curl -v (він також робить TLS handshake)
 ```
 
 ### Основи firewall
@@ -410,7 +413,108 @@ ps / ls / sudo -u myapp ...
 
 ---
 
-## 7. Пакети та встановлення софту
+## 7. Заплановані задачі — cron та systemd timers
+
+Типовий сценарій: нічний бекап і періодичне очищення логів, які мають працювати без вас.
+
+### Основи cron
+
+```bash
+# Редагувати crontab поточного користувача
+crontab -e
+
+# Показати встановлені cron-записи
+crontab -l
+```
+
+Синтаксис із 5 полів:
+
+```text
+┌───────── хвилина       (0-59)
+│ ┌─────── година        (0-23)
+│ │ ┌───── день місяця   (1-31)
+│ │ │ ┌─── місяць        (1-12)
+│ │ │ │ ┌─ день тижня    (0-7, 0 і 7 = неділя)
+│ │ │ │ │
+* * * * *  команда
+```
+
+Реалістичні записи:
+
+```bash
+# Нічний бекап о 02:30
+30 2 * * * /srv/myapp/bin/backup.sh >> /var/log/myapp-backup.log 2>&1
+
+# Видаляти логи застосунку, старші за 14 днів, щонеділі о 04:00
+0 4 * * 0 /usr/bin/find /var/log/myapp -name "*.log" -mtime +14 -delete
+
+# Health check кожні 5 хвилин
+*/5 * * * * /usr/bin/curl -fsS http://localhost:8080/health >> /var/log/healthcheck.log 2>&1
+```
+
+### Класичні пастки cron
+
+```bash
+# Погано: покладається на оточення інтерактивного shell
+30 2 * * * backup.sh
+
+# Правильно: cron має мінімальний PATH і майже без env vars
+# - використовуйте абсолютні шляхи для скрипта і для інструментів усередині нього
+# - перенаправляйте вивід у лог; 2>&1 захоплює також помилки
+30 2 * * * /srv/myapp/bin/backup.sh >> /var/log/myapp-backup.log 2>&1
+```
+
+> "У терміналі працює, у cron падає" — це майже завжди PATH, env vars або відносний шлях.
+
+### systemd timers — сучасна альтернатива
+
+Timer — це пара юнітів: `myjob.service` (що запускати) + `myjob.timer` (коли).
+
+```ini
+# /etc/systemd/system/myjob.service
+[Unit]
+Description=Nightly backup
+
+[Service]
+Type=oneshot
+ExecStart=/srv/myapp/bin/backup.sh
+```
+
+```ini
+# /etc/systemd/system/myjob.timer
+[Unit]
+Description=Run nightly backup at 02:30
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now myjob.timer
+
+# Показати всі таймери і коли вони спрацюють наступного разу
+systemctl list-timers
+
+# Логи потрапляють у journal — ручні редиректи не потрібні
+journalctl -u myjob.service -n 50
+```
+
+Чому timers кращі за cron:
+
+- вивід автоматично потрапляє в journal (`journalctl -u`)
+- залежності від інших юнітів (`After=network-online.target`, mounts)
+- `RandomizedDelaySec` розмазує навантаження по флоту серверів
+- `Persistent=true` запускає пропущену задачу після того, як машина була вимкнена
+
+---
+
+## 8. Пакети та встановлення софту
 
 ### Debian / Ubuntu
 
@@ -459,7 +563,7 @@ sudo install -m 0755 ./kubectl /usr/local/bin/kubectl
 
 ---
 
-## 8. Логи та діагностика
+## 9. Логи та діагностика
 
 ### Читати системні логи
 
@@ -495,7 +599,7 @@ timedatectl
 ### Дослідити стан процесу під час роботи
 
 ```bash
-# Відкриті файли
+# Відкриті файли (запускайте з sudo, щоб бачити все у процесі іншого користувача)
 sudo lsof -p 1234
 
 # Змінні середовища процесу
@@ -507,7 +611,7 @@ readlink /proc/1234/cwd
 
 ---
 
-## 9. Дисковий простір та очищення
+## 10. Дисковий простір та очищення
 
 ### Подивитись вільне місце
 
@@ -553,7 +657,7 @@ sudo journalctl --vacuum-size=500M
 
 ---
 
-## 10. SSH, curl, tar та інші щоденні інструменти
+## 11. SSH, curl, tar та інші щоденні інструменти
 
 ### SSH
 
@@ -598,7 +702,7 @@ awk '{print $1, $9}' access.log
 
 ---
 
-## 11. Дебаг — від хаотичного до системного
+## 12. Дебаг — від хаотичного до системного
 
 ### Поганий підхід
 
@@ -642,10 +746,16 @@ awk '{print $1, $9}' access.log
 | Сервіс крутиться в restart loop | Невірний `ExecStart`, бракує файлу, поганий env var | `systemctl status`, `journalctl -u` |
 | DNS-ім'я не резолвиться | Проблема з resolver або DNS-конфігом | `getent hosts`, `dig`, `cat /etc/resolv.conf` |
 | Диск переповнений | Логи, кеш, видалені-але-відкриті файли | `df -h`, `du -sh`, `lsof +L1` |
+| Процес зник без сліду | Його вбив OOM killer через брак пам'яті | `dmesg -T \| grep -i oom`, `journalctl -k` |
+| "No space left on device", але `df -h` показує вільне місце | Закінчились inodes через мільйони дрібних файлів | `df -i`, `du --inodes -s /var/* \| sort -n` |
+| HTTPS падає з помилкою сертифіката | Прострочений або невалідний TLS-сертифікат | `curl -vI https://…`, `openssl s_client -connect host:443 \| openssl x509 -noout -dates` |
+| `Connection refused` vs timeout | Refused: на порту ніхто не слухає. Timeout: firewall дропає пакети | спершу `ss -ltn` на сервері, потім правила firewall |
+
+> `namei -l` проходить кожен компонент шляху і виводить його права — показує, яка саме тека в ланцюжку блокує доступ.
 
 ---
 
-## 12. Корисні аліаси та скрипти
+## 13. Корисні аліаси та скрипти
 
 ### Аліаси
 

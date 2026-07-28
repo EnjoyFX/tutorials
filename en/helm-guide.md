@@ -2,6 +2,8 @@
 
 > Not just commands. Real-world daily usage scenarios.
 
+> **See also:** [Docker](docker-guide.md) · [Linux](linux-guide.md) · [k3s](k3s-dev-guide.md) · [Compose → Helm](compose-to-helm.md) · [Demo walkthrough](examples-guide.md) · [Runnable demo chart](../examples/helm/myapp)
+
 ---
 
 ## Table of Contents
@@ -66,6 +68,7 @@ flowchart LR
 brew install helm
 
 # Linux (script)
+# Caution: review the script or verify its checksum first — don't blindly pipe remote code to bash
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Verify version
@@ -144,6 +147,25 @@ helm show chart bitnami/postgresql
 
 # Download chart locally to explore
 helm pull bitnami/postgresql --untar
+```
+
+### OCI registries — charts in a container registry
+
+Since Helm 3.8+, charts can live in any OCI-compatible container registry
+(Docker Hub, GHCR, Harbor, ECR...). This is the modern default for private chart
+distribution: no separate chart server to run — auth and storage reuse the
+registry you already have for images.
+
+```bash
+# Log in (same credentials as docker login)
+helm registry login registry.example.com
+
+# Package and push a chart
+helm package ./mychart                # produces mychart-0.1.0.tgz
+helm push mychart-0.1.0.tgz oci://registry.example.com/charts
+
+# Install straight from the registry — no helm repo add needed
+helm install myapp oci://registry.example.com/charts/mychart --version 0.1.0
 ```
 
 ---
@@ -368,6 +390,10 @@ helm create myapp
 #   .helmignore           — like .gitignore
 ```
 
+> A real minimal chart lives in this repo at [`../examples/helm/myapp`](../examples/helm/myapp):
+> deployment + service + optional ingress, with security contexts and probes —
+> a working reference for everything described below.
+
 ### Chart.yaml — metadata
 
 ```yaml
@@ -390,6 +416,78 @@ dependencies:          # dependencies (subcharts)
 helm dependency update ./myapp
 # Downloads to myapp/charts/postgresql-13.x.x.tgz
 ```
+
+### Subcharts: overriding values and locking versions
+
+Values for a subchart are set under a key named after the dependency —
+everything under `postgresql:` in the parent's values is passed down to the
+postgresql chart:
+
+```yaml
+# values.yaml of the parent chart
+postgresql:
+  enabled: true                 # matched by condition: in Chart.yaml
+  auth:
+    username: myapp
+    password: ""                # override at deploy time, not in git
+    database: myapp_db
+```
+
+```bash
+# Disable the subchart entirely (e.g. prod uses a managed database):
+helm upgrade --install myapp ./myapp --set postgresql.enabled=false
+# Works because Chart.yaml declares condition: postgresql.enabled
+```
+
+`helm dependency update` also writes `Chart.lock` — the exact resolved versions
+(`13.x.x` → `13.2.24`). Commit it: teammates and CI then run
+`helm dependency build`, which installs exactly the locked versions instead of
+re-resolving the ranges. Same idea as package-lock.json.
+
+```bash
+helm dependency update ./myapp   # re-resolve version ranges, rewrite Chart.lock
+helm dependency build  ./myapp   # install exactly what Chart.lock says (use in CI)
+```
+
+### values.schema.json — validating values
+
+Put a JSON Schema next to values.yaml and Helm validates the merged values on
+every `helm install`, `helm upgrade` and `helm lint` — automatically, no flags
+needed. It catches typos (`replicas` vs `replicaCount`) and wrong types
+(`port: "8080"` as a string) before anything reaches the cluster, where they
+would fail in far more confusing ways.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "required": ["tag"],
+      "properties": {
+        "tag": { "type": "string", "minLength": 1 }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    }
+  }
+}
+```
+
+```bash
+# Schema violations fail fast with a readable message
+helm lint ./myapp --set image.tag=""
+# [ERROR] values don't meet the specifications of the schema(s):
+# image.tag: String length must be greater than or equal to 1
+```
+
+> A complete working schema is at
+> [`../examples/helm/myapp/values.schema.json`](../examples/helm/myapp/values.schema.json).
 
 ---
 
@@ -536,6 +634,42 @@ spec:
 > **Rule:** if a string appears in two templates — it belongs in `_helpers.tpl`.
 > If a value changes between runs — it belongs in `values.yaml`.
 
+### Hooks — Jobs around the release lifecycle
+
+A hook is a regular manifest with a `helm.sh/hook` annotation. Helm renders it
+with the rest of the chart but applies it at a specific lifecycle point — here,
+DB migrations run *before* the new app version rolls out. The upgrade waits for
+the Job to succeed; if migrations fail, the release fails and the old version
+keeps running.
+
+```yaml
+# templates/migrate-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "myapp.fullname" . }}-migrate
+  annotations:
+    "helm.sh/hook": pre-upgrade                 # run before upgrade applies the manifests
+    "helm.sh/hook-weight": "0"                  # order among hooks (lower runs first)
+    # delete the previous hook Job before creating a new one; clean up on success
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0            # don't blindly retry a failed migration
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["./manage.py", "migrate"]
+```
+
+Other hook points: `pre-install`, `post-install`, `post-upgrade`, `pre-delete`, etc.
+
+`helm test` uses the same mechanism: a Pod annotated `"helm.sh/hook": test`
+lives in the chart and runs only when you call `helm test <release>` —
+a built-in smoke test right after deploy.
+
 ---
 
 ## 9. Debugging
@@ -611,6 +745,21 @@ helm template myapp ./myapp -f values.yaml \
   | grep -A5 "image:"
 ```
 
+### helm-diff — preview what an upgrade will change
+
+```bash
+# Install the plugin
+helm plugin install https://github.com/databus23/helm-diff
+
+# Exact diff between the live release and what the upgrade would apply
+helm diff upgrade myapp ./myapp -f values-prod.yaml
+```
+
+`helm template` shows *everything*; `helm diff` shows only what *changes* —
+which is what you actually want to review before an upgrade. In CI it's the
+de-facto standard "approve before apply" step: post the diff to the PR,
+apply only after review.
+
 ---
 
 ## 10. Helm in CI/CD
@@ -645,6 +794,55 @@ helm upgrade --install myapp ./myapp \
 
 > **Important:** `--set` is not a fully secure way to pass secrets.
 > For production, prefer External Secrets, Sealed Secrets, Vault, or SOPS.
+
+### Secrets in Git — three working approaches
+
+**Sealed Secrets** — encrypt with the cluster's public key and commit the
+encrypted manifest; only the in-cluster controller can decrypt it:
+
+```bash
+# One-time: install the controller into the cluster
+helm install sealed-secrets sealed-secrets \
+  --repo https://bitnami-labs.github.io/sealed-secrets -n kube-system
+
+# Encrypt a regular Secret manifest → SealedSecret manifest
+kubectl create secret generic app-db-secret \
+  --from-literal=password=S3cret --dry-run=client -o yaml \
+  | kubeseal -o yaml > sealed-secret.yaml
+
+git add sealed-secret.yaml            # safe to commit — only the controller can decrypt
+kubectl apply -f sealed-secret.yaml   # controller creates the real Secret in-cluster
+```
+
+**SOPS + helm-secrets** — encrypt a whole values file with an age or cloud KMS
+key; Helm decrypts it transparently at deploy time:
+
+```bash
+helm plugin install https://github.com/jkroepke/helm-secrets
+sops --encrypt --age <public-key> secrets.yaml > secrets.enc.yaml   # commit this file
+helm secrets upgrade --install myapp ./myapp -f values-prod.yaml -f secrets.enc.yaml
+```
+
+**External Secrets Operator (ESO)** — secrets live in Vault / AWS Secrets
+Manager / GCP SM; an `ExternalSecret` manifest (safe for git) syncs them into
+k8s Secrets:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: app-db-secret
+spec:
+  secretStoreRef: { name: vault-backend, kind: ClusterSecretStore }
+  target: { name: app-db-secret }     # the k8s Secret ESO creates and keeps in sync
+  data:
+    - secretKey: password
+      remoteRef: { key: myapp/db, property: password }
+```
+
+> **Which to pick:** small team, git-centric workflow → Sealed Secrets or SOPS
+> (no extra infrastructure). Company already runs Vault / AWS SM / GCP SM → ESO,
+> so secrets keep a single source of truth outside the cluster.
 
 ### Different values per environment
 

@@ -2,6 +2,8 @@
 
 > Не просто команди. Сценарії реального щоденного використання.
 
+> **Дивись також:** [Linux](linux-guide.md) · [Helm](helm-guide.md) · [k3s](k3s-dev-guide.md) · [Compose → Helm](compose-to-helm.md) · [Розбір демо](examples-guide.md) · [Демо-приклад](../examples/README.md)
+
 ---
 
 ## Зміст
@@ -18,6 +20,8 @@
 10. [Очищення системи](#10-очищення-системи)
 11. [Docker у CI/CD](#11-docker-у-cicd)
 12. [Корисні аліаси та скрипти](#12-корисні-аліаси-та-скрипти)
+
+- [Шпаргалка: образи vs контейнери vs compose](#шпаргалка-образи-vs-контейнери-vs-compose)
 
 ---
 
@@ -238,6 +242,42 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 ```
+
+### BuildKit: кеш-маунти та секрети збірки
+
+> BuildKit — білдер за замовчуванням у сучасному Docker, нічого налаштовувати не треба.
+> Дві фічі, які варто використовувати з першого дня: cache mounts і build secrets.
+
+```dockerfile
+# Cache mount — кеш пакетного менеджера переживає перезбірки,
+# але НЕ потрапляє в шари образу (образ лишається малим)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
+
+# Те саме для npm
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# І для apt
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y curl
+```
+
+```dockerfile
+# Build secret — доступний тільки під час цього RUN,
+# не записується в жоден шар (на відміну від ARG/ENV, які лишаються в історії образу!)
+RUN --mount=type=secret,id=npm_token \
+    NPM_TOKEN=$(cat /run/secrets/npm_token) npm ci
+```
+
+```bash
+# Передати секрет зі змінної середовища під час збірки
+docker build --secret id=npm_token,env=NPM_TOKEN -t myapp .
+```
+
+> **Навіщо:** без cache mount кожна зміна залежностей перекачує все заново;
+> з ним кеш зберігається між збірками і не роздуває образ.
+> Секрети через `--build-arg` назавжди видні в `docker history` — `--secret` там не з'являється.
 
 ### .dockerignore — обов'язково мати
 
@@ -586,6 +626,11 @@ docker port myapp
 
 ## 8. Docker Compose
 
+> **`docker compose` vs `docker-compose`:** `docker compose` (через пробіл) — це плагін
+> v2, який іде в комплекті з Docker — сучасний стандарт. Окремий `docker-compose`
+> (через дефіс) — застарілий v1 на Python, deprecated і вже не підтримується.
+> Скрізь у цьому довіднику — тільки `docker compose`.
+
 ### Терміни
 
 | Термін | Що це |
@@ -715,6 +760,55 @@ services:
     # немає volumes з bind mount
 ```
 
+### Profiles — сервіси, що запускаються за умовою
+
+Сервіси з profile не стартують за замовчуванням — зручно для debug-інструментів,
+які потрібні лише інколи.
+
+```yaml
+services:
+  app:
+    build: .
+
+  pgadmin:
+    image: dpage/pgadmin4
+    profiles: [debug]     # стартує тільки коли активовано профіль debug
+```
+
+```bash
+# Звичайний запуск — pgadmin не стартує
+docker compose up -d
+
+# Запуск разом з профілем debug
+docker compose --profile debug up -d
+```
+
+### compose watch — авто-синхронізація під час розробки
+
+Замість bind mount Compose може сам стежити за файлами: миттєво синхронізувати
+змінений код у контейнер, а перезбирати образ тільки при зміні залежностей.
+
+```yaml
+services:
+  app:
+    build: .
+    develop:
+      watch:
+        - action: sync        # копіювати змінені файли в запущений контейнер
+          path: ./src
+          target: /app/src
+        - action: rebuild     # перезібрати образ при зміні залежностей
+          path: package.json
+```
+
+```bash
+# Запустити сервіси та стежити за змінами файлів
+docker compose up --watch
+
+# Або окремою командою (сервіси мають бути вже описані)
+docker compose watch
+```
+
 ---
 
 ## 9. Registry — публікація образів
@@ -759,8 +853,12 @@ docker push registry.example.com/myapp:v1.2.0
 
 ### Multi-architecture образи (arm64 + amd64)
 
+> **Коли потрібен multi-arch?** Коли машина збірки і цільові машини мають різні
+> архітектури CPU: Mac на Apple Silicon (arm64) у команді, сервери AWS Graviton,
+> Raspberry Pi. Збери `amd64` + `arm64` один раз — Docker сам витягне потрібний варіант.
+
 ```bash
-# Потрібен buildx (вбудований в Docker Desktop, встановити окремо на Linux)
+# buildx іде в комплекті з Docker починаючи з 20.10 — створюємо multi-arch білдер
 docker buildx create --use --name multiarch
 
 # Зібрати і запушити для обох архітектур одразу
@@ -839,6 +937,8 @@ docker push myapp:${IMAGE_TAG}
 helm upgrade --install myapp ./helm/myapp \
   --set image.tag=${IMAGE_TAG}
 ```
+
+> Про сам Helm (чарти, values, rollback) — дивись [helm-guide.md](helm-guide.md).
 
 ### Сканування вразливостей
 

@@ -2,6 +2,8 @@
 
 > Один застосунок, три рівні деплою. Від локального контейнера до Kubernetes-кластера.
 
+> **Дивись також:** [Docker](docker-guide.md) · [Linux](linux-guide.md) · [Helm](helm-guide.md) · [k3s](k3s-dev-guide.md) · [Compose → Helm](compose-to-helm.md) · [Демо-код](../examples/README.md)
+
 ---
 
 ## Зміст
@@ -36,15 +38,18 @@ examples/
 ├── docker/
 │   ├── app.py          ← сам застосунок
 │   ├── Dockerfile      ← інструкція для збірки образу
+│   ├── compose.yaml    ← локальний запуск через Docker Compose
 │   └── .dockerignore   ← що не класти в образ
 ├── helm/
 │   └── myapp/
 │       ├── Chart.yaml              ← метадані чарту
 │       ├── values.yaml             ← змінні за замовчуванням
+│       ├── values.schema.json      ← схема валідації values
 │       └── templates/
 │           ├── _helpers.tpl        ← спільні шаблони імен та лейблів
 │           ├── deployment.yaml     ← як запустити pod
-│           └── service.yaml        ← як дістатися до pod
+│           ├── service.yaml        ← як дістатися до pod
+│           └── ingress.yaml        ← опціональний доступ ззовні
 └── k3s/
     └── deploy.sh       ← скрипт: build → import → helm deploy
 ```
@@ -177,6 +182,52 @@ __pycache__
 
 Без цього файлу Docker включить кеш Python у build context, що забруднить образ байт-кодом з локальної машини.
 
+### Локальний запуск через Docker Compose
+
+Для щоденної розробки замість ручних `docker build` + `docker run` зручніше один файл — [compose.yaml](../examples/docker/compose.yaml):
+
+```yaml
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      MESSAGE: "Hello from Compose!"
+      APP_VERSION: "1.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+```
+
+- `build: .` — Compose сам збирає образ з Dockerfile у цій директорії
+- `healthcheck` — той самий `/health`, що й probes у Kubernetes; `wget` вже є в alpine-образі
+- `restart: unless-stopped` — контейнер підніметься після падіння чи перезавантаження Docker
+
+```bash
+cd examples/docker
+
+# Зібрати і запустити (--build перезбирає образ після зміни коду)
+docker compose up --build
+
+# Або у фоні
+docker compose up --build -d
+
+# Статус healthcheck: (healthy) у колонці STATUS
+docker compose ps
+
+# Перевірити
+curl http://localhost:8080/
+
+# Зупинити і прибрати контейнери
+docker compose down
+```
+
+Цей самий застосунок далі поїде в Kubernetes — як поля Compose мапляться на Helm-чарт, розібрано в [Compose → Helm](compose-to-helm.md).
+
 ---
 
 ## 5. Helm — чарт для Kubernetes
@@ -275,6 +326,52 @@ spec:
 ```
 
 `ClusterIP` — стандартний тип для внутрішніх сервісів. Для доступу ззовні — `port-forward` або Ingress.
+
+### templates/ingress.yaml — опціональний Ingress
+
+Чарт містить Ingress, який **вимкнений за замовчуванням** — весь шаблон обгорнутий в `{{- if .Values.ingress.enabled }}`. У `values.yaml` за це відповідає блок:
+
+```yaml
+ingress:
+  enabled: false
+  # k3s йде з Traefik; порожній className = IngressClass за замовчуванням
+  className: ""
+  annotations: {}
+  host: myapp.local
+  tls:
+    enabled: false
+    secretName: myapp-tls
+```
+
+k3s з коробки ставить Traefik як Ingress-контролер, тож окремо нічого встановлювати не треба. Увімкнути доступ ззовні:
+
+```bash
+helm upgrade --install myapp examples/helm/myapp \
+  --namespace demo --create-namespace \
+  --set ingress.enabled=true \
+  --set ingress.host=myapp.local \
+  --wait
+
+# Додати host у /etc/hosts (IP ноди k3s) і перевірити
+curl http://myapp.local/
+```
+
+**TLS** — теж опціональний. Спершу створюємо secret з сертифікатом, потім вмикаємо `ingress.tls.enabled`:
+
+```bash
+# Secret має існувати до деплою
+kubectl create secret tls myapp-tls \
+  --cert=tls.crt --key=tls.key -n demo
+
+helm upgrade --install myapp examples/helm/myapp \
+  --namespace demo \
+  --set ingress.enabled=true \
+  --set ingress.host=myapp.local \
+  --set ingress.tls.enabled=true \
+  --set ingress.tls.secretName=myapp-tls
+```
+
+Усі поля блоку `ingress` описані у `values.schema.json` — Helm відхилить values з помилковою структурою ще до рендерингу.
 
 ### Корисні команди Helm
 

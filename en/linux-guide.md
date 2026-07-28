@@ -2,6 +2,8 @@
 
 > Not just commands. Real-world daily usage scenarios.
 
+> **See also:** [Docker](docker-guide.md) · [Helm](helm-guide.md) · [k3s](k3s-dev-guide.md) · [Compose → Helm](compose-to-helm.md) · [Demo walkthrough](examples-guide.md) · [Runnable demo](../examples/README.md)
+
 ---
 
 ## Table of Contents
@@ -12,12 +14,13 @@
 4. [Processes and Background Jobs](#4-processes-and-background-jobs)
 5. [Networking and Connectivity Checks](#5-networking-and-connectivity-checks)
 6. [systemd and Service Management](#6-systemd-and-service-management)
-7. [Packages and Software Installation](#7-packages-and-software-installation)
-8. [Logs and Diagnostics](#8-logs-and-diagnostics)
-9. [Disk Usage and Cleanup](#9-disk-usage-and-cleanup)
-10. [SSH, curl, tar, and Other Daily Tools](#10-ssh-curl-tar-and-other-daily-tools)
-11. [Debugging — Chaotic vs Systematic](#11-debugging--chaotic-vs-systematic)
-12. [Useful Aliases and Scripts](#12-useful-aliases-and-scripts)
+7. [Scheduled Tasks — cron and systemd timers](#7-scheduled-tasks--cron-and-systemd-timers)
+8. [Packages and Software Installation](#8-packages-and-software-installation)
+9. [Logs and Diagnostics](#9-logs-and-diagnostics)
+10. [Disk Usage and Cleanup](#10-disk-usage-and-cleanup)
+11. [SSH, curl, tar, and Other Daily Tools](#11-ssh-curl-tar-and-other-daily-tools)
+12. [Debugging — Chaotic vs Systematic](#12-debugging--chaotic-vs-systematic)
+13. [Useful Aliases and Scripts](#13-useful-aliases-and-scripts)
 
 ---
 
@@ -294,7 +297,7 @@ ip route
 # DNS resolution
 getent hosts example.com
 dig example.com
-nslookup example.com
+nslookup example.com   # legacy — prefer dig, it shows more detail
 
 # Test connectivity
 ping 8.8.8.8
@@ -322,7 +325,7 @@ curl -H "Authorization: Bearer $TOKEN" https://api.example.com/me
 
 ```bash
 nc -vz example.com 443
-telnet example.com 443
+telnet example.com 443   # legacy — prefer nc -vz, or curl -v (also does the TLS handshake)
 ```
 
 ### Firewall basics
@@ -410,7 +413,108 @@ ps / ls / sudo -u myapp ...
 
 ---
 
-## 7. Packages and Software Installation
+## 7. Scheduled Tasks — cron and systemd timers
+
+Typical scenario: a nightly backup and periodic log cleanup that must run without you.
+
+### cron basics
+
+```bash
+# Edit the current user's crontab
+crontab -e
+
+# List installed cron entries
+crontab -l
+```
+
+The 5-field syntax:
+
+```text
+┌───────── minute        (0-59)
+│ ┌─────── hour          (0-23)
+│ │ ┌───── day of month  (1-31)
+│ │ │ ┌─── month         (1-12)
+│ │ │ │ ┌─ day of week   (0-7, 0 and 7 = Sunday)
+│ │ │ │ │
+* * * * *  command
+```
+
+Realistic entries:
+
+```bash
+# Nightly backup at 02:30
+30 2 * * * /srv/myapp/bin/backup.sh >> /var/log/myapp-backup.log 2>&1
+
+# Delete app logs older than 14 days, every Sunday at 04:00
+0 4 * * 0 /usr/bin/find /var/log/myapp -name "*.log" -mtime +14 -delete
+
+# Health check every 5 minutes
+*/5 * * * * /usr/bin/curl -fsS http://localhost:8080/health >> /var/log/healthcheck.log 2>&1
+```
+
+### Classic cron pitfalls
+
+```bash
+# Bad: relies on the interactive shell environment
+30 2 * * * backup.sh
+
+# Right: cron has a minimal PATH and almost no env vars
+# - use absolute paths for the script and the tools inside it
+# - redirect output to a log; 2>&1 also captures errors
+30 2 * * * /srv/myapp/bin/backup.sh >> /var/log/myapp-backup.log 2>&1
+```
+
+> "Works in my terminal, fails in cron" is almost always PATH, env vars, or a relative path.
+
+### systemd timers — the modern alternative
+
+A timer is a pair of units: `myjob.service` (what to run) + `myjob.timer` (when).
+
+```ini
+# /etc/systemd/system/myjob.service
+[Unit]
+Description=Nightly backup
+
+[Service]
+Type=oneshot
+ExecStart=/srv/myapp/bin/backup.sh
+```
+
+```ini
+# /etc/systemd/system/myjob.timer
+[Unit]
+Description=Run nightly backup at 02:30
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now myjob.timer
+
+# See all timers and when they fire next
+systemctl list-timers
+
+# Logs go to the journal — no manual redirects needed
+journalctl -u myjob.service -n 50
+```
+
+Why timers beat cron:
+
+- output lands in the journal automatically (`journalctl -u`)
+- dependencies on other units (`After=network-online.target`, mounts)
+- `RandomizedDelaySec` spreads load across a fleet
+- `Persistent=true` runs a missed job after the machine was off
+
+---
+
+## 8. Packages and Software Installation
 
 ### Debian / Ubuntu
 
@@ -459,7 +563,7 @@ sudo install -m 0755 ./kubectl /usr/local/bin/kubectl
 
 ---
 
-## 8. Logs and Diagnostics
+## 9. Logs and Diagnostics
 
 ### Read system logs
 
@@ -495,7 +599,7 @@ timedatectl
 ### Inspect process runtime state
 
 ```bash
-# Open files
+# Open files (run with sudo for full visibility of another user's process)
 sudo lsof -p 1234
 
 # Environment variables of a process
@@ -507,7 +611,7 @@ readlink /proc/1234/cwd
 
 ---
 
-## 9. Disk Usage and Cleanup
+## 10. Disk Usage and Cleanup
 
 ### See free space
 
@@ -553,7 +657,7 @@ sudo journalctl --vacuum-size=500M
 
 ---
 
-## 10. SSH, curl, tar, and Other Daily Tools
+## 11. SSH, curl, tar, and Other Daily Tools
 
 ### SSH
 
@@ -598,7 +702,7 @@ awk '{print $1, $9}' access.log
 
 ---
 
-## 11. Debugging — Chaotic vs Systematic
+## 12. Debugging — Chaotic vs Systematic
 
 ### Bad approach
 
@@ -642,10 +746,16 @@ Service does not work
 | Service restarts in loop | Wrong `ExecStart`, missing file, bad env var | `systemctl status`, `journalctl -u` |
 | DNS name does not resolve | Broken resolver or wrong DNS config | `getent hosts`, `dig`, `cat /etc/resolv.conf` |
 | Disk full | Logs, cache, deleted-but-open files | `df -h`, `du -sh`, `lsof +L1` |
+| Process disappeared without a trace | Killed by the OOM killer under memory pressure | `dmesg -T \| grep -i oom`, `journalctl -k` |
+| "No space left on device" but `df -h` shows free space | Inodes exhausted by millions of small files | `df -i`, `du --inodes -s /var/* \| sort -n` |
+| HTTPS fails with certificate error | Expired or invalid TLS certificate | `curl -vI https://…`, `openssl s_client -connect host:443 \| openssl x509 -noout -dates` |
+| `Connection refused` vs timeout | Refused: nothing listens on the port. Timeout: firewall drops packets | `ss -ltn` on the server first, then firewall rules |
+
+> `namei -l` walks every component of a path and prints its permissions — it shows exactly which directory in the chain blocks access.
 
 ---
 
-## 12. Useful Aliases and Scripts
+## 13. Useful Aliases and Scripts
 
 ### Aliases
 

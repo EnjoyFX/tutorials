@@ -3,6 +3,8 @@
 > A typical developer journey: the app runs locally via `compose.yaml` — now it needs to go into k3s.
 > This guide is a step-by-step transition from Compose to a Helm chart, without magic.
 
+> **See also:** [Docker](docker-guide.md) · [Linux](linux-guide.md) · [Helm](helm-guide.md) · [k3s](k3s-dev-guide.md) · [Demo walkthrough](examples-guide.md) · [Runnable demo](../examples/README.md)
+
 ---
 
 ## Table of Contents
@@ -19,6 +21,7 @@
 10. [Step 7 — package as a Helm chart](#10-step-7--package-as-a-helm-chart)
 11. [Automatic conversion — kompose](#11-automatic-conversion--kompose)
 12. [Full chart overview](#12-full-chart-overview)
+13. [Distributing the chart](#13-distributing-the-chart)
 
 ---
 
@@ -82,6 +85,10 @@ volumes:
 ```
 
 Goal: bring this into k3s while keeping the same behaviour.
+
+The repo also ships a runnable minimal compose file for the demo app —
+[`../examples/docker/compose.yaml`](../examples/docker/compose.yaml) — and its Helm-chart twin at
+[`../examples/helm/myapp`](../examples/helm/myapp), so you can do the whole migration hands-on.
 
 ---
 
@@ -207,6 +214,11 @@ spec:
             periodSeconds: 10
 ```
 
+Note the difference between the two probes: a failing `readinessProbe` keeps the pod
+running but takes it out of Service traffic; a failing `livenessProbe` restarts the container.
+Typical mistake — pointing liveness at a dependency (e.g. a `/health` that checks the DB):
+a DB outage then causes restart loops instead of a graceful wait.
+
 **postgres:**
 
 ```yaml
@@ -245,6 +257,38 @@ spec:
           persistentVolumeClaim:
             claimName: postgres-pvc
 ```
+
+> ❌ **A Deployment for the database is fine for dev only.** A production database wants a
+> `StatefulSet`: stable network identity, ordered rollout, `volumeClaimTemplates` per replica.
+> Better still — a database operator (e.g. CloudNativePG) or a managed DB outside the cluster.
+
+### imagePullSecrets — private registry
+
+If the image lives in a private registry, the cluster needs credentials to pull it:
+
+```bash
+# Registry credentials as a Secret
+kubectl create secret docker-registry regcred \
+  --docker-server=my-registry.example.com \
+  --docker-username=deploy \
+  --docker-password='S3cret!' \
+  -n my-namespace
+```
+
+```yaml
+# In the pod spec of the Deployment
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: app
+          image: my-registry.example.com/myapp:v1.0.0
+```
+
+In the chart step this becomes a `values.yaml` knob (`imagePullSecrets: [{name: regcred}]`) —
+for dev without a registry the list simply stays empty.
 
 ---
 
@@ -364,12 +408,24 @@ myapp/
 ├── values.yaml
 └── templates/
     ├── _helpers.tpl
+    ├── NOTES.txt
     ├── app-deployment.yaml
     ├── app-service.yaml
     ├── app-configmap.yaml
     ├── postgres-deployment.yaml
     ├── postgres-service.yaml
     └── postgres-pvc.yaml
+```
+
+**Chart.yaml** — chart metadata, the minimal complete version:
+
+```yaml
+apiVersion: v2                # always v2 for Helm 3
+name: myapp
+description: Python app + PostgreSQL, migrated from Docker Compose
+type: application
+version: 0.1.0                # chart version — bump on every chart change
+appVersion: "1.0.0"           # app version — informational
 ```
 
 **values.yaml** — everything that differs between dev and prod:
@@ -380,6 +436,7 @@ app:
     repository: my-registry/myapp
     tag: "v1.0.0"
     pullPolicy: IfNotPresent
+  imagePullSecrets: []        # e.g. [{name: regcred}] for a private registry
   replicaCount: 1
   message: "Hello from Helm!"
   resources:
@@ -397,6 +454,11 @@ postgres:
   existingSecret: postgres-secrets   # Secret created separately, outside the chart
   storage: 1Gi
 ```
+
+Also worth adding `templates/NOTES.txt` — a plain-text template Helm renders and prints
+after `helm install` / `helm upgrade`. Put the post-install essentials there, e.g. the
+port-forward command:
+`kubectl port-forward service/app-service 8080:8080 -n {{ .Release.Namespace }}`.
 
 **Deploy:**
 
@@ -417,6 +479,21 @@ helm upgrade --install myapp ./myapp \
 kubectl get all -n demo
 kubectl port-forward service/app-service 8080:8080 -n demo
 ```
+
+### Verify the migration before touching the cluster
+
+```bash
+# Render the templates locally and eyeball the manifests
+helm template ./myapp | less
+
+# Full client-side validation with values and hooks, no install
+helm install myapp ./myapp --dry-run --debug -n demo
+
+# Server-side schema check — the API server validates, nothing is created
+helm template ./myapp | kubectl apply --dry-run=server -f -
+```
+
+This catches schema and template errors before anything reaches the cluster.
 
 ---
 
@@ -484,3 +561,28 @@ docker compose up
 # Staging / production — via Helm
 helm upgrade --install myapp ./myapp -n demo --wait
 ```
+
+---
+
+## 13. Distributing the chart
+
+The chart works — where should it live?
+
+| Option | When it fits |
+|---|---|
+| In the app repo (e.g. `deploy/chart/`) | simplest — chart is versioned together with the code |
+| Classic chart repo (`helm package` + repo index) | several teams / many charts, shared over HTTP |
+| OCI registry (`helm push`) | you already have a container registry — reuse it |
+
+```bash
+# Classic chart repo: package + index
+helm package ./myapp                      # → myapp-0.1.0.tgz
+helm repo index . --url https://charts.example.com
+
+# OCI registry — the same registry that stores your images
+helm push myapp-0.1.0.tgz oci://my-registry.example.com/helm-charts
+helm install myapp oci://my-registry.example.com/helm-charts/myapp --version 0.1.0
+```
+
+OCI details and deeper Helm topics — in [helm-guide.md](helm-guide.md);
+deploying and troubleshooting on a real cluster — in [k3s-dev-guide.md](k3s-dev-guide.md).

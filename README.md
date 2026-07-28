@@ -14,7 +14,7 @@ Each guide is written as a real-world reference — not a list of commands, but 
 | **Linux** | [en/linux-guide.md](en/linux-guide.md) | [ua/linux-guide.md](ua/linux-guide.md) |
 | **Helm** | [en/helm-guide.md](en/helm-guide.md) | [ua/helm-guide.md](ua/helm-guide.md) |
 | **k3s** | [en/k3s-dev-guide.md](en/k3s-dev-guide.md) | [ua/k3s-dev-guide.md](ua/k3s-dev-guide.md) |
-| **Demo App** (Docker → Helm → k3s) | [examples/README.md](examples/README.md) | [ua/examples-guide.md](ua/examples-guide.md) |
+| **Demo App** (Docker → Helm → k3s) | [en/examples-guide.md](en/examples-guide.md) | [ua/examples-guide.md](ua/examples-guide.md) |
 | **Compose → Helm migration** | [en/compose-to-helm.md](en/compose-to-helm.md) | [ua/compose-to-helm.md](ua/compose-to-helm.md) |
 
 ---
@@ -39,7 +39,7 @@ Lightweight Kubernetes in practice: installation, daily cluster diagnostics, dep
 
 ### Demo App
 
-A minimal end-to-end example — Python HTTP server built into a Docker image, packaged as a Helm chart, and deployed on k3s. Includes liveness/readiness probes, non-root Dockerfile, and a one-command deploy script.
+A minimal end-to-end example — Python HTTP server built into a Docker image, packaged as a Helm chart, and deployed on k3s. Includes liveness/readiness probes, a non-root Dockerfile, a Compose file for local runs, an optional TLS-ready Ingress in the chart (Traefik ships with k3s), and a one-command deploy script. Runnable code lives in [examples/](examples/README.md).
 
 ### Compose → Helm Migration
 
@@ -56,7 +56,8 @@ Step-by-step guide for taking a `compose.yaml` and turning it into a Helm chart:
 │   ├── linux-guide.md
 │   ├── helm-guide.md
 │   ├── k3s-dev-guide.md
-│   └── compose-to-helm.md
+│   ├── compose-to-helm.md
+│   └── examples-guide.md
 ├── ua/                      # Ukrainian
 │   ├── docker-guide.md
 │   ├── linux-guide.md
@@ -65,7 +66,7 @@ Step-by-step guide for taking a `compose.yaml` and turning it into a Helm chart:
 │   ├── compose-to-helm.md
 │   └── examples-guide.md
 ├── examples/                # Runnable demo: Docker → Helm → k3s
-│   ├── docker/              # Python app + Dockerfile
+│   ├── docker/              # Python app + Dockerfile + compose.yaml
 │   ├── helm/myapp/          # Helm chart
 │   └── k3s/                 # deploy.sh
 ├── tests/

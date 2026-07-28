@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -eu
 
 CDPATH=
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

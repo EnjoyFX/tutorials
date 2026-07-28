@@ -3,23 +3,28 @@
 Minimal end-to-end demo: Python HTTP server built into a Docker image,
 packaged as a Helm chart, and deployed on k3s.
 
+Line-by-line walkthrough of every file:
+[en/examples-guide.md](../en/examples-guide.md) · [ua/examples-guide.md](../ua/examples-guide.md).
+
 ## Structure
 
 ```
 examples/
-├── docker/          # Python app + Dockerfile
+├── docker/          # Python app + Dockerfile + compose.yaml
 │   ├── app.py
 │   ├── Dockerfile
+│   ├── compose.yaml
 │   └── .dockerignore
 ├── helm/
-│   └── myapp/       # Helm chart (Deployment + Service)
+│   └── myapp/       # Helm chart (Deployment + Service + optional Ingress)
 │       ├── Chart.yaml
 │       ├── values.schema.json
 │       ├── values.yaml
 │       └── templates/
 │           ├── _helpers.tpl
 │           ├── deployment.yaml
-│           └── service.yaml
+│           ├── service.yaml
+│           └── ingress.yaml
 └── k3s/
     └── deploy.sh    # Full pipeline: build → import → helm deploy
 ```
@@ -28,13 +33,25 @@ examples/
 
 ### 1. Docker only
 
+`compose.yaml` is the local-dev entry point — one command builds and runs
+the app with a healthcheck and restart policy:
+
+```sh
+cd examples/docker
+docker compose up --build
+
+curl http://localhost:8080/
+curl http://localhost:8080/health
+
+docker compose down
+```
+
+Or manually, without Compose:
+
 ```sh
 cd examples/docker
 docker build -t myapp:local .
 docker run --rm -p 8080:8080 myapp:local
-
-curl http://localhost:8080/
-curl http://localhost:8080/health
 ```
 
 ### 2. Helm (local cluster / k3d / kind)
@@ -101,3 +118,17 @@ helm upgrade --install myapp examples/helm/myapp \
   --set env.MESSAGE="Hello, k3s!" \
   --set replicaCount=2
 ```
+
+## Optional Ingress
+
+The chart ships an Ingress that is off by default. k3s includes Traefik,
+so no extra controller is needed:
+
+```sh
+helm upgrade --install myapp examples/helm/myapp \
+  --set ingress.enabled=true \
+  --set ingress.host=myapp.local
+```
+
+TLS: create the secret first (`kubectl create secret tls myapp-tls --cert=... --key=... -n demo`),
+then add `--set ingress.tls.enabled=true`.

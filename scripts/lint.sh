@@ -13,6 +13,7 @@
 #   ShellCheck  — brew install shellcheck
 #   hadolint    — brew install hadolint
 #   lychee      — brew install lychee
+#   kubeconform — brew install kubeconform
 #   docker      — used for the demo image smoke test when the daemon is available
 
 set -e
@@ -63,6 +64,20 @@ run_optional() {
   run_check optional "$@"
 }
 
+kubeconform_check() {
+  if ! command -v kubeconform > /dev/null 2>&1; then
+    echo "kubeconform not found"
+    return 77
+  fi
+  if ! command -v helm > /dev/null 2>&1; then
+    echo "helm not found"
+    return 77
+  fi
+  helm template myapp examples/helm/myapp --namespace demo \
+    --set ingress.enabled=true --set ingress.tls.enabled=true \
+    | kubeconform -strict -summary
+}
+
 docker_smoke() {
   if ! command -v curl > /dev/null 2>&1; then
     echo "curl not found"
@@ -111,6 +126,7 @@ run_required "python syntax"      uv run python -m py_compile examples/docker/ap
 run_required "pytest"             uv run pytest tests/ -q
 run_required "helm lint"          helm lint examples/helm/myapp
 run_required "helm template"       helm template myapp examples/helm/myapp --namespace demo
+run_optional "kubeconform"         kubeconform_check
 run_optional "shellcheck"          shellcheck examples/k3s/deploy.sh
 run_optional "hadolint"            hadolint examples/docker/Dockerfile
 run_optional "links check"         lychee --config .lychee.toml --verbose README.md en/*.md ua/*.md examples/*.md

@@ -12,8 +12,8 @@ jobs:
     name: Markdown lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -23,7 +23,7 @@ jobs:
     name: Links check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: lycheeverse/lychee-action@v2
         with:
           args: --config .lychee.toml --verbose '**/*.md'
@@ -33,8 +33,8 @@ jobs:
     name: Spellcheck (EN)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -44,8 +44,8 @@ jobs:
     name: Syntax check (examples)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
       - run: uv sync --frozen
@@ -73,6 +73,14 @@ jobs:
         uses: azure/setup-helm@v4
       - run: helm lint examples/helm/myapp
       - run: helm template myapp examples/helm/myapp --namespace demo
+
+      - name: Helm — kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz kubeconform
+          helm template myapp examples/helm/myapp --namespace demo \
+            --set ingress.enabled=true --set ingress.tls.enabled=true \
+            | ./kubeconform -strict -summary
 
       - name: Docker — smoke test
         run: |

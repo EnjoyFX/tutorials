@@ -2,6 +2,8 @@
 
 > Не просто команди. Сценарії реального щоденного використання.
 
+> **Дивись також:** [Docker](docker-guide.md) · [Linux](linux-guide.md) · [k3s](k3s-dev-guide.md) · [Compose → Helm](compose-to-helm.md) · [Розбір демо](examples-guide.md) · [Демо-чарт](../examples/helm/myapp)
+
 ---
 
 ## Зміст
@@ -66,6 +68,7 @@ flowchart LR
 brew install helm
 
 # Linux (скрипт)
+# Обережно: перегляньте скрипт або перевірте checksum — не передавайте чужий код у bash наосліп
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Перевірити версію
@@ -144,6 +147,25 @@ helm show chart bitnami/postgresql
 
 # Завантажити чарт локально для вивчення
 helm pull bitnami/postgresql --untar
+```
+
+### OCI-реєстри — чарти в container registry
+
+Починаючи з Helm 3.8+ чарти можна зберігати в будь-якому OCI-сумісному
+container registry (Docker Hub, GHCR, Harbor, ECR...). Це сучасний стандарт для
+приватної дистрибуції чартів: не треба піднімати окремий chart-сервер —
+автентифікація і сховище ті самі, що вже є для образів.
+
+```bash
+# Залогінитись (ті самі креденшали, що й docker login)
+helm registry login registry.example.com
+
+# Запакувати і запушити чарт
+helm package ./mychart                # створить mychart-0.1.0.tgz
+helm push mychart-0.1.0.tgz oci://registry.example.com/charts
+
+# Встановити прямо з реєстру — helm repo add не потрібен
+helm install myapp oci://registry.example.com/charts/mychart --version 0.1.0
 ```
 
 ---
@@ -368,6 +390,10 @@ helm create myapp
 #   .helmignore           — аналог .gitignore
 ```
 
+> Реальний мінімальний чарт лежить у цьому репо: [`../examples/helm/myapp`](../examples/helm/myapp) —
+> deployment + service + опційний ingress, з security context-ами та пробами.
+> Робочий приклад для всього, що описано нижче.
+
 ### Chart.yaml — метадані
 
 ```yaml
@@ -390,6 +416,78 @@ dependencies:          # залежності (субчарти)
 helm dependency update ./myapp
 # Завантажить у myapp/charts/postgresql-13.x.x.tgz
 ```
+
+### Субчарти: перекриття values і фіксація версій
+
+Values для субчарту задаються під ключем з назвою залежності — все, що лежить
+під `postgresql:` у values батьківського чарту, передається вниз у чарт
+postgresql:
+
+```yaml
+# values.yaml батьківського чарту
+postgresql:
+  enabled: true                 # відповідає condition: у Chart.yaml
+  auth:
+    username: myapp
+    password: ""                # перекривати під час деплою, не в git
+    database: myapp_db
+```
+
+```bash
+# Вимкнути субчарт повністю (наприклад, prod використовує managed-базу):
+helm upgrade --install myapp ./myapp --set postgresql.enabled=false
+# Працює, бо в Chart.yaml оголошено condition: postgresql.enabled
+```
+
+`helm dependency update` також записує `Chart.lock` — точні резолвнуті версії
+(`13.x.x` → `13.2.24`). Комітьте його: колеги та CI потім запускають
+`helm dependency build`, який ставить саме зафіксовані версії, а не резолвить
+діапазони заново. Та сама ідея, що й package-lock.json.
+
+```bash
+helm dependency update ./myapp   # перерезолвити діапазони версій, переписати Chart.lock
+helm dependency build  ./myapp   # поставити рівно те, що в Chart.lock (для CI)
+```
+
+### values.schema.json — валідація values
+
+Покладіть JSON Schema поруч із values.yaml — і Helm валідує змерджені values
+при кожному `helm install`, `helm upgrade` і `helm lint` — автоматично, без
+жодних флагів. Це ловить одруки (`replicas` замість `replicaCount`) і неправильні
+типи (`port: "8080"` як рядок) ще до того, як щось потрапить у кластер, де вони
+впали б значно заплутанішим чином.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "required": ["tag"],
+      "properties": {
+        "tag": { "type": "string", "minLength": 1 }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    }
+  }
+}
+```
+
+```bash
+# Порушення схеми падає одразу зі зрозумілим повідомленням
+helm lint ./myapp --set image.tag=""
+# [ERROR] values don't meet the specifications of the schema(s):
+# image.tag: String length must be greater than or equal to 1
+```
+
+> Повна робоча схема лежить у
+> [`../examples/helm/myapp/values.schema.json`](../examples/helm/myapp/values.schema.json).
 
 ---
 
@@ -536,6 +634,42 @@ spec:
 > **Правило:** якщо рядок зустрічається у двох шаблонах — він має бути у `_helpers.tpl`.
 > Якщо значення різниться між запусками — воно має бути у `values.yaml`.
 
+### Hooks — Job-и навколо життєвого циклу релізу
+
+Hook — це звичайний маніфест з анотацією `helm.sh/hook`. Helm рендерить його
+разом з рештою чарту, але застосовує у конкретній точці життєвого циклу — тут
+міграції БД виконуються *до* викатки нової версії застосунку. Upgrade чекає,
+поки Job завершиться успішно; якщо міграції впали — реліз падає, а стара версія
+продовжує працювати.
+
+```yaml
+# templates/migrate-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "myapp.fullname" . }}-migrate
+  annotations:
+    "helm.sh/hook": pre-upgrade                 # виконати до того, як upgrade застосує маніфести
+    "helm.sh/hook-weight": "0"                  # порядок серед hook-ів (менша вага — раніше)
+    # видалити попередній hook-Job перед створенням нового; прибрати після успіху
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0            # не ретраїти впалу міграцію наосліп
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["./manage.py", "migrate"]
+```
+
+Інші точки hook-ів: `pre-install`, `post-install`, `post-upgrade`, `pre-delete` тощо.
+
+`helm test` використовує той самий механізм: Pod з анотацією `"helm.sh/hook": test`
+живе у чарті і запускається тільки коли ви викликаєте `helm test <release>` —
+вбудований smoke-тест одразу після деплою.
+
 ---
 
 ## 9. Налагодження
@@ -611,6 +745,21 @@ helm template myapp ./myapp -f values.yaml \
   | grep -A5 "image:"
 ```
 
+### helm-diff — переглянути, що саме змінить upgrade
+
+```bash
+# Встановити плагін
+helm plugin install https://github.com/databus23/helm-diff
+
+# Точний diff між живим релізом і тим, що застосує upgrade
+helm diff upgrade myapp ./myapp -f values-prod.yaml
+```
+
+`helm template` показує *все*; `helm diff` показує тільки те, що *змінюється* —
+а саме це і треба переглянути перед upgrade-ом. У CI це де-факто стандартний
+крок "approve before apply": запостити diff у PR, застосовувати тільки після
+рев'ю.
+
 ---
 
 ## 10. Helm у CI/CD
@@ -645,6 +794,55 @@ helm upgrade --install myapp ./myapp \
 
 > **Важливо:** `--set` не є повністю безпечним способом передачі секретів.
 > Для production краще використовувати External Secrets, Sealed Secrets, Vault або SOPS.
+
+### Секрети в Git — три робочі підходи
+
+**Sealed Secrets** — шифруєте публічним ключем кластера і комітите зашифрований
+маніфест; розшифрувати його може тільки контролер всередині кластера:
+
+```bash
+# Один раз: встановити контролер у кластер
+helm install sealed-secrets sealed-secrets \
+  --repo https://bitnami-labs.github.io/sealed-secrets -n kube-system
+
+# Зашифрувати звичайний маніфест Secret → маніфест SealedSecret
+kubectl create secret generic app-db-secret \
+  --from-literal=password=S3cret --dry-run=client -o yaml \
+  | kubeseal -o yaml > sealed-secret.yaml
+
+git add sealed-secret.yaml            # безпечно комітити — розшифрує тільки контролер
+kubectl apply -f sealed-secret.yaml   # контролер створить справжній Secret у кластері
+```
+
+**SOPS + helm-secrets** — шифруєте цілий файл values ключем age або хмарного
+KMS; Helm прозоро розшифровує його під час деплою:
+
+```bash
+helm plugin install https://github.com/jkroepke/helm-secrets
+sops --encrypt --age <public-key> secrets.yaml > secrets.enc.yaml   # цей файл комітимо
+helm secrets upgrade --install myapp ./myapp -f values-prod.yaml -f secrets.enc.yaml
+```
+
+**External Secrets Operator (ESO)** — секрети живуть у Vault / AWS Secrets
+Manager / GCP SM; маніфест `ExternalSecret` (безпечний для git) синхронізує їх
+у k8s Secrets:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: app-db-secret
+spec:
+  secretStoreRef: { name: vault-backend, kind: ClusterSecretStore }
+  target: { name: app-db-secret }     # k8s Secret, який ESO створює і синхронізує
+  data:
+    - secretKey: password
+      remoteRef: { key: myapp/db, property: password }
+```
+
+> **Що обрати:** маленька команда, git-центричний процес → Sealed Secrets або
+> SOPS (без додаткової інфраструктури). У компанії вже є Vault / AWS SM / GCP SM
+> → ESO, щоб секрети мали єдине джерело правди поза кластером.
 
 ### Різні values для різних середовищ
 

@@ -2,20 +2,24 @@
 
 > Not just commands. Real-world daily usage scenarios.
 
+> **See also:** [Docker](docker-guide.md) · [Linux](linux-guide.md) · [Helm](helm-guide.md) · [Compose → Helm](compose-to-helm.md) · [Demo walkthrough](examples-guide.md) · [Runnable demo](../examples/README.md)
+
 ---
 
 ## Table of Contents
 
 1. [Installation and First Run](#1-installation-and-first-run)
-2. [Daily Diagnostics](#2-daily-diagnostics)
-3. [Deploying Applications](#3-deploying-applications)
-4. [Working with Configs](#4-working-with-configs)
-5. [Troubleshooting](#5-troubleshooting) ✦ [anti-patterns](#debugging--chaotic-vs-systematic)
-6. [Networking and Ingress](#6-networking-and-ingress)
-7. [Storage and PVC](#7-storage-and-pvc)
-8. [Secrets and ConfigMap](#8-secrets-and-configmap)
-9. [Multi-Node Cluster](#9-multi-node-cluster)
-10. [Useful Aliases and Scripts](#10-useful-aliases-and-scripts)
+2. [Upgrades and Backups](#2-upgrades-and-backups)
+3. [Daily Diagnostics](#3-daily-diagnostics)
+4. [Deploying Applications](#4-deploying-applications)
+5. [Working with Configs](#5-working-with-configs)
+6. [Troubleshooting](#6-troubleshooting) ✦ [anti-patterns](#debugging--chaotic-vs-systematic)
+7. [Networking and Ingress](#7-networking-and-ingress)
+8. [Storage and PVC](#8-storage-and-pvc)
+9. [Secrets and ConfigMap](#9-secrets-and-configmap)
+10. [RBAC Basics](#10-rbac-basics)
+11. [Multi-Node Cluster](#11-multi-node-cluster)
+12. [Useful Aliases and Scripts](#12-useful-aliases-and-scripts)
 
 ---
 
@@ -70,7 +74,76 @@ sudo journalctl -u k3s -f
 
 ---
 
-## 2. Daily Diagnostics
+## 2. Upgrades and Backups
+
+### Upgrading k3s
+
+An upgrade is the same install script, re-run with a pinned channel or version:
+
+```bash
+# First check what you are running
+k3s --version
+kubectl get nodes        # VERSION column — all nodes at a glance
+
+# Upgrade to the latest release of the stable channel
+curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=stable sh -
+
+# Or pin an exact version (recommended — reproducible)
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.33.1+k3s1 sh -
+
+# Verify after the restart
+kubectl get nodes
+```
+
+> **Order matters:** always upgrade the **server** first, then the agents.
+> On a multi-node cluster go one node at a time: `cordon` → drain → upgrade → `uncordon` —
+> the exact commands are in [Cordon / Drain](#cordon--drain--node-maintenance).
+
+### Backup: single-node (SQLite)
+
+A default single-node k3s keeps cluster state in SQLite.
+Back it up by stopping k3s and archiving the database directory:
+
+```bash
+# 1. Stop k3s (running pods keep working, but the API becomes unavailable)
+sudo systemctl stop k3s
+
+# 2. Archive the state database
+sudo tar czf k3s-db-backup-$(date +%F).tar.gz \
+  -C /var/lib/rancher/k3s/server db/
+
+# 3. Also save the server token — a restore is useless without it
+sudo cp /var/lib/rancher/k3s/server/token k3s-token-backup
+
+# 4. Start k3s again
+sudo systemctl start k3s
+```
+
+### Restore
+
+```bash
+# 1. Stop k3s
+sudo systemctl stop k3s
+
+# 2. Put the database back
+sudo rm -rf /var/lib/rancher/k3s/server/db
+sudo tar xzf k3s-db-backup-2026-07-28.tar.gz -C /var/lib/rancher/k3s/server/
+
+# 3. Restore the token and start
+sudo cp k3s-token-backup /var/lib/rancher/k3s/server/token
+sudo systemctl start k3s
+```
+
+> **HA mode (embedded etcd):** if the cluster runs etcd instead of SQLite,
+> use the built-in snapshots: `k3s etcd-snapshot save`,
+> and restore with `k3s server --cluster-reset --cluster-reset-restore-path=<snapshot>`.
+>
+> **Practical warning:** a backup you have never restored is a hope, not a backup.
+> Test the restore flow on a scratch VM before you need it for real.
+
+---
+
+## 3. Daily Diagnostics
 
 ### "What's happening in the cluster right now?"
 
@@ -84,15 +157,16 @@ kubectl get pods -A
 # Only problematic pods (rough text filter)
 kubectl get pods -A | grep -v Running | grep -v Completed
 
-# Node resource usage (CPU/RAM) — requires metrics-server
+# Node resource usage (CPU/RAM) — via metrics-server (bundled in k3s)
 kubectl top nodes
 
-# Pod resource usage — also requires metrics-server
+# Pod resource usage
 kubectl top pods -A --sort-by=memory
 ```
 
-> **Note:** if `kubectl top` returns `Metrics API not available`,
-> install `metrics-server` or another metrics provider.
+> **Note:** k3s ships `metrics-server` by default, so `kubectl top` works out of the box.
+> If it returns `Metrics API not available`, first verify the component is actually running:
+> `kubectl -n kube-system get pods | grep metrics-server`.
 
 ### "What's up with my application?"
 
@@ -122,7 +196,7 @@ kubectl get events -n my-namespace
 
 ---
 
-## 3. Deploying Applications
+## 4. Deploying Applications
 
 ### Basic deploy from file
 
@@ -188,7 +262,7 @@ kubectl run tmp --image=alpine --rm -it --restart=Never -- sh
 
 ---
 
-## 4. Working with Configs
+## 5. Working with Configs
 
 ### Switching between clusters / namespaces
 
@@ -267,7 +341,7 @@ kubens     # select namespace via search
 
 ---
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 ### Debugging — chaotic vs systematic
 
@@ -377,7 +451,7 @@ kubectl run dns-test --image=busybox --rm -it --restart=Never -- \
 
 ---
 
-## 6. Networking and Ingress
+## 7. Networking and Ingress
 
 ### K3s Traefik Ingress (built-in)
 
@@ -419,6 +493,74 @@ kubectl port-forward -n kube-system \
 # Open: http://localhost:9000/dashboard/
 ```
 
+### TLS / HTTPS
+
+**Manual path** — you already have a certificate (bought, or from an internal CA):
+
+```bash
+# Store the certificate as a TLS secret
+kubectl create secret tls myapp-tls \
+  --cert=fullchain.pem \
+  --key=privkey.pem \
+  -n my-namespace
+```
+
+```yaml
+# Add spec.tls to the ingress example above
+spec:
+  tls:
+    - hosts:
+        - myapp.local
+      secretName: myapp-tls
+  rules:
+    # ... unchanged
+```
+
+**Automated path** — cert-manager issues and renews Let's Encrypt certificates for you:
+
+```bash
+# Install cert-manager via Helm
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
+```
+
+```yaml
+# clusterissuer.yaml — Let's Encrypt with HTTP-01 via the built-in Traefik
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: you@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: traefik
+```
+
+```yaml
+# On the Ingress: one annotation + spec.tls — cert-manager does the rest
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - myapp.example.com
+      secretName: myapp-tls   # cert-manager creates and renews this secret
+```
+
+> **In this repo:** the demo chart [`../examples/helm/myapp`](../examples/helm/myapp)
+> ships an optional TLS-ready ingress — enable it via `ingress.enabled`
+> and `ingress.tls.enabled` in `values.yaml`.
+
 ### Port-forward for local development
 
 ```bash
@@ -445,7 +587,7 @@ kubectl get nodes -o wide
 
 ---
 
-## 7. Storage and PVC
+## 8. Storage and PVC
 
 ### Glossary
 
@@ -595,7 +737,7 @@ kubectl edit pvc myapp-data -n my-namespace
 
 ---
 
-## 8. Secrets and ConfigMap
+## 9. Secrets and ConfigMap
 
 ### ConfigMap
 
@@ -651,7 +793,78 @@ kubectl rollout restart deployment/myapp -n my-namespace
 
 ---
 
-## 9. Multi-Node Cluster
+## 10. RBAC Basics
+
+### Scenario: a CI pipeline deploys to one namespace and nothing else
+
+A CI job should not use the admin kubeconfig. Give it a ServiceAccount
+whose permissions end at the namespace border:
+
+```yaml
+# ci-deployer.yaml — ServiceAccount + Role + RoleBinding
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployer
+  namespace: myns
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deployer
+  namespace: myns
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-deployer
+  namespace: myns
+subjects:
+  - kind: ServiceAccount
+    name: ci-deployer
+    namespace: myns
+roleRef:
+  kind: Role
+  name: ci-deployer
+  apiGroup: rbac.authorization.k8s.io
+```
+
+```bash
+kubectl apply -f ci-deployer.yaml
+
+# Issue a token for CI (a year; shorter is better if CI can refresh it)
+kubectl create token ci-deployer -n myns --duration=8760h
+# Alternative: a bound token Secret (type kubernetes.io/service-account-token)
+# never expires but must be revoked manually
+
+# Plug the token into a separate kubeconfig for CI:
+# kubectl config set-credentials ci-deployer --token=<TOKEN>
+# kubectl config set-context ci --cluster=<cluster> --user=ci-deployer --namespace=myns
+```
+
+> **Role vs ClusterRole:** a `Role` works inside a single namespace;
+> a `ClusterRole` covers cluster-wide resources (nodes, PVs) or all namespaces at once.
+> For CI deploys a namespaced `Role` is exactly what you want — least privilege.
+
+```bash
+# Verify: what can this ServiceAccount actually do?
+kubectl auth can-i --as=system:serviceaccount:myns:ci-deployer \
+  create deployments -n myns          # yes
+
+kubectl auth can-i --as=system:serviceaccount:myns:ci-deployer \
+  delete pods -n kube-system          # no — exactly the point
+```
+
+---
+
+## 11. Multi-Node Cluster
 
 ### Single-node vs Multi-node
 
@@ -722,7 +935,7 @@ kubectl uncordon worker-1
 
 ---
 
-## 10. Useful Aliases and Scripts
+## 12. Useful Aliases and Scripts
 
 ### ~/.bashrc / ~/.zshrc — add these aliases
 
@@ -791,6 +1004,10 @@ chmod +x deploy-local.sh
 ./deploy-local.sh myapp v1.2.0 production
 ```
 
+> **In this repo:** a fuller version of this script ships at
+> [`../examples/k3s/deploy.sh`](../examples/k3s/deploy.sh) — it adds a Helm deploy
+> with `--atomic`, namespace bootstrap, and dependency checks.
+
 ### Script: full namespace health check
 
 ```bash
@@ -844,6 +1061,35 @@ kubectl get events -n $NS \
 ---
 
 ## Starter Manifests
+
+### CronJob (scheduled task)
+
+> **Deployment** is for processes that run forever (web servers, workers).
+> **Job** runs once to completion; **CronJob** runs a Job on a schedule —
+> use them for migrations, backups, report generation.
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  namespace: my-namespace
+spec:
+  schedule: "0 3 * * *"           # every day at 03:00 (cron syntax)
+  concurrencyPolicy: Forbid       # don't start a new run while the previous one is still going
+  successfulJobsHistoryLimit: 3   # keep the last 3 successful pods for logs
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2             # retry a failed run at most 2 times
+      template:
+        spec:
+          restartPolicy: Never    # for Jobs: Never or OnFailure, not Always
+          containers:
+            - name: backup
+              image: my-registry/backup-tool:latest
+              args: ["--target", "s3://backups/daily"]
+```
 
 ### Minimal Deployment + Service
 
@@ -904,6 +1150,10 @@ spec:
 ---
 
 > **Tip:** Keep all manifests in Git. Use `kubectl apply -f ./` for an entire directory.
-> For more complex projects — consider Helm or Kustomize.
+> For more complex projects, pick a packaging tool:
 >
-> **Helm:** detailed practical guide → [helm-guide.md](./helm-guide.md)
+> - **Helm** — templating + versioned releases + rollback; best for reusable,
+>   multi-environment packaging → [helm-guide.md](./helm-guide.md)
+> - **Kustomize** — patches/overlays on plain YAML, built into kubectl (`kubectl apply -k`);
+>   best when you want no templating at all
+> - Coming from Docker Compose? → [compose-to-helm.md](./compose-to-helm.md)

@@ -26,6 +26,17 @@ service:
   type: ClusterIP
   port: 8080
 
+ingress:
+  enabled: false
+  # k3s ships with Traefik; leave className empty to use the default IngressClass
+  className: ""
+  annotations: {}
+  host: myapp.local
+  tls:
+    enabled: false
+    # kubectl create secret tls myapp-tls --cert=... --key=... -n <namespace>
+    secretName: myapp-tls
+
 env:
   MESSAGE: "Hello from myapp!"
   APP_VERSION: "1.0.0"

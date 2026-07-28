@@ -2,6 +2,8 @@
 
 > Not just commands. Real-world daily usage scenarios.
 
+> **See also:** [Linux](linux-guide.md) · [Helm](helm-guide.md) · [k3s](k3s-dev-guide.md) · [Compose → Helm](compose-to-helm.md) · [Demo walkthrough](examples-guide.md) · [Runnable demo](../examples/README.md)
+
 ---
 
 ## Table of Contents
@@ -18,6 +20,8 @@
 10. [System Cleanup](#10-system-cleanup)
 11. [Docker in CI/CD](#11-docker-in-cicd)
 12. [Useful Aliases and Scripts](#12-useful-aliases-and-scripts)
+
+- [Cheatsheet: images vs containers vs compose](#cheatsheet-images-vs-containers-vs-compose)
 
 ---
 
@@ -238,6 +242,42 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 ```
+
+### BuildKit: cache mounts and build secrets
+
+> BuildKit is the default builder in modern Docker — no setup needed.
+> Two features worth using from day one: cache mounts and build secrets.
+
+```dockerfile
+# Cache mount — the package manager cache survives rebuilds
+# but does NOT end up in image layers (image stays small)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
+
+# Same idea for npm
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# And for apt
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y curl
+```
+
+```dockerfile
+# Build secret — available only during this RUN,
+# never written to any layer (unlike ARG/ENV, which leak into image history!)
+RUN --mount=type=secret,id=npm_token \
+    NPM_TOKEN=$(cat /run/secrets/npm_token) npm ci
+```
+
+```bash
+# Pass the secret from an environment variable at build time
+docker build --secret id=npm_token,env=NPM_TOKEN -t myapp .
+```
+
+> **Why:** without a cache mount, every dependency change re-downloads everything;
+> with one, the cache persists between builds without bloating the image.
+> Secrets via `--build-arg` stay visible in `docker history` forever — `--secret` doesn't.
 
 ### .dockerignore — must have
 
@@ -586,6 +626,11 @@ docker port myapp
 
 ## 8. Docker Compose
 
+> **`docker compose` vs `docker-compose`:** `docker compose` (with a space) is the v2
+> plugin that ships with Docker — the modern standard. The standalone `docker-compose`
+> (with a hyphen) is the legacy v1 Python tool — deprecated and end-of-life.
+> Everywhere in this guide: only `docker compose`.
+
 ### Glossary
 
 | Term | What it is |
@@ -715,6 +760,55 @@ services:
     # no bind mount volumes
 ```
 
+### Profiles — conditionally started services
+
+Services tagged with a profile don't start by default — handy for debug tooling
+you only need occasionally.
+
+```yaml
+services:
+  app:
+    build: .
+
+  pgadmin:
+    image: dpage/pgadmin4
+    profiles: [debug]     # starts only when the debug profile is activated
+```
+
+```bash
+# Normal start — pgadmin stays down
+docker compose up -d
+
+# Start including the debug profile
+docker compose --profile debug up -d
+```
+
+### compose watch — auto-sync during development
+
+Instead of a bind mount, Compose can watch files itself: sync changed source
+into the container instantly, rebuild only when dependencies change.
+
+```yaml
+services:
+  app:
+    build: .
+    develop:
+      watch:
+        - action: sync        # copy changed files into the running container
+          path: ./src
+          target: /app/src
+        - action: rebuild     # rebuild the image when dependencies change
+          path: package.json
+```
+
+```bash
+# Start services and watch for file changes
+docker compose up --watch
+
+# Or as a standalone command (services must already be defined)
+docker compose watch
+```
+
 ---
 
 ## 9. Registry — Publishing Images
@@ -759,8 +853,12 @@ docker push registry.example.com/myapp:v1.2.0
 
 ### Multi-architecture images (arm64 + amd64)
 
+> **When do you need multi-arch?** When build and target machines differ in CPU
+> architecture: Apple Silicon Macs (arm64) on the team, AWS Graviton servers,
+> Raspberry Pi. Build `amd64` + `arm64` once — Docker pulls the right one automatically.
+
 ```bash
-# Requires buildx (built into Docker Desktop, install separately on Linux)
+# buildx has shipped with Docker since 20.10 — create a multi-arch builder
 docker buildx create --use --name multiarch
 
 # Build and push for both architectures at once
@@ -839,6 +937,8 @@ docker push myapp:${IMAGE_TAG}
 helm upgrade --install myapp ./helm/myapp \
   --set image.tag=${IMAGE_TAG}
 ```
+
+> For Helm itself (charts, values, rollback), see [helm-guide.md](helm-guide.md).
 
 ### Vulnerability scanning
 

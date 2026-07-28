@@ -2,20 +2,24 @@
 
 > Не просто команди. Сценарії реального щоденного використання.
 
+> **Дивись також:** [Docker](docker-guide.md) · [Linux](linux-guide.md) · [Helm](helm-guide.md) · [Compose → Helm](compose-to-helm.md) · [Розбір демо](examples-guide.md) · [Демо-приклад](../examples/README.md)
+
 ---
 
 ## Зміст
 
 1. [Встановлення та перший запуск](#1-встановлення-та-перший-запуск)
-2. [Щоденна діагностика](#2-щоденна-діагностика)
-3. [Деплой застосунків](#3-деплой-застосунків)
-4. [Робота з конфігами](#4-робота-з-конфігами)
-5. [Налагодження проблем](#5-налагодження-проблем) ✦ [антипатерни](#дебаг--від-хаотичного-до-системного)
-6. [Networking та Ingress](#6-networking-та-ingress)
-7. [Storage та PVC](#7-storage-та-pvc)
-8. [Секрети та ConfigMap](#8-секрети-та-configmap)
-9. [Мультинодовий кластер](#9-мультинодовий-кластер)
-10. [Корисні аліаси та скрипти](#10-корисні-аліаси-та-скрипти)
+2. [Оновлення та резервні копії](#2-оновлення-та-резервні-копії)
+3. [Щоденна діагностика](#3-щоденна-діагностика)
+4. [Деплой застосунків](#4-деплой-застосунків)
+5. [Робота з конфігами](#5-робота-з-конфігами)
+6. [Налагодження проблем](#6-налагодження-проблем) ✦ [антипатерни](#дебаг--від-хаотичного-до-системного)
+7. [Networking та Ingress](#7-networking-та-ingress)
+8. [Storage та PVC](#8-storage-та-pvc)
+9. [Секрети та ConfigMap](#9-секрети-та-configmap)
+10. [Основи RBAC](#10-основи-rbac)
+11. [Мультинодовий кластер](#11-мультинодовий-кластер)
+12. [Корисні аліаси та скрипти](#12-корисні-аліаси-та-скрипти)
 
 ---
 
@@ -70,7 +74,76 @@ sudo journalctl -u k3s -f
 
 ---
 
-## 2. Щоденна діагностика
+## 2. Оновлення та резервні копії
+
+### Оновлення k3s
+
+Оновлення — це той самий інсталяційний скрипт, запущений повторно із зафіксованим каналом або версією:
+
+```bash
+# Спочатку перевірити, що зараз запущено
+k3s --version
+kubectl get nodes        # колонка VERSION — всі ноди одним поглядом
+
+# Оновитись до останнього релізу каналу stable
+curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=stable sh -
+
+# Або зафіксувати точну версію (рекомендовано — відтворювано)
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.33.1+k3s1 sh -
+
+# Перевірити після рестарту
+kubectl get nodes
+```
+
+> **Порядок важливий:** спочатку завжди оновлюйте **сервер**, потім агенти.
+> У multi-node кластері йдіть по одній ноді: `cordon` → drain → оновлення → `uncordon` —
+> точні команди у розділі [Cordon / Drain](#cordon--drain--обслуговування-ноди).
+
+### Бекап: single-node (SQLite)
+
+Типовий single-node k3s зберігає стан кластера у SQLite.
+Бекап робиться так: зупинити k3s і заархівувати теку з базою даних:
+
+```bash
+# 1. Зупинити k3s (запущені pod-и продовжують працювати, але API стає недоступним)
+sudo systemctl stop k3s
+
+# 2. Заархівувати базу зі станом
+sudo tar czf k3s-db-backup-$(date +%F).tar.gz \
+  -C /var/lib/rancher/k3s/server db/
+
+# 3. Зберегти також токен сервера — без нього відновлення марне
+sudo cp /var/lib/rancher/k3s/server/token k3s-token-backup
+
+# 4. Запустити k3s знову
+sudo systemctl start k3s
+```
+
+### Відновлення
+
+```bash
+# 1. Зупинити k3s
+sudo systemctl stop k3s
+
+# 2. Повернути базу на місце
+sudo rm -rf /var/lib/rancher/k3s/server/db
+sudo tar xzf k3s-db-backup-2026-07-28.tar.gz -C /var/lib/rancher/k3s/server/
+
+# 3. Відновити токен і запустити
+sudo cp k3s-token-backup /var/lib/rancher/k3s/server/token
+sudo systemctl start k3s
+```
+
+> **HA-режим (embedded etcd):** якщо кластер працює на etcd замість SQLite,
+> користуйтесь вбудованими снапшотами: `k3s etcd-snapshot save`,
+> а відновлення — `k3s server --cluster-reset --cluster-reset-restore-path=<snapshot>`.
+>
+> **Практичне попередження:** бекап, який жодного разу не відновлювали, — це надія, а не бекап.
+> Протестуйте процедуру відновлення на тестовій VM до того, як вона знадобиться по-справжньому.
+
+---
+
+## 3. Щоденна діагностика
 
 ### "Що зараз відбувається в кластері?"
 
@@ -84,15 +157,16 @@ kubectl get pods -A
 # Тільки проблемні pod-и (грубий фільтр по текстовому виводу)
 kubectl get pods -A | grep -v Running | grep -v Completed
 
-# Ресурси нод (CPU/RAM) — потрібен metrics-server
+# Ресурси нод (CPU/RAM) — через metrics-server (вбудований у k3s)
 kubectl top nodes
 
-# Ресурси pod-ів — теж потрібен metrics-server
+# Ресурси pod-ів
 kubectl top pods -A --sort-by=memory
 ```
 
-> **Примітка:** якщо `kubectl top` повертає `Metrics API not available`,
-> встановіть `metrics-server` або інший провайдер метрик.
+> **Примітка:** k3s постачається з `metrics-server` за замовчуванням, тому `kubectl top` працює одразу.
+> Якщо повертає `Metrics API not available`, спочатку перевірте, чи компонент справді запущений:
+> `kubectl -n kube-system get pods | grep metrics-server`.
 
 ### "Що з моїм застосунком?"
 
@@ -122,7 +196,7 @@ kubectl get events -n my-namespace
 
 ---
 
-## 3. Деплой застосунків
+## 4. Деплой застосунків
 
 ### Базовий деплой з файлу
 
@@ -188,7 +262,7 @@ kubectl run tmp --image=alpine --rm -it --restart=Never -- sh
 
 ---
 
-## 4. Робота з конфігами
+## 5. Робота з конфігами
 
 ### Перемикання між кластерами / namespace
 
@@ -267,7 +341,7 @@ kubens     # вибір namespace через пошук
 
 ---
 
-## 5. Налагодження проблем
+## 6. Налагодження проблем
 
 ### Дебаг — від хаотичного до системного
 
@@ -377,7 +451,7 @@ kubectl run dns-test --image=busybox --rm -it --restart=Never -- \
 
 ---
 
-## 6. Networking та Ingress
+## 7. Networking та Ingress
 
 ### K3s Traefik Ingress (вбудований)
 
@@ -419,6 +493,74 @@ kubectl port-forward -n kube-system \
 # Відкрити: http://localhost:9000/dashboard/
 ```
 
+### TLS / HTTPS
+
+**Ручний шлях** — сертифікат уже є (куплений або від внутрішнього CA):
+
+```bash
+# Зберегти сертифікат як TLS-секрет
+kubectl create secret tls myapp-tls \
+  --cert=fullchain.pem \
+  --key=privkey.pem \
+  -n my-namespace
+```
+
+```yaml
+# Додати spec.tls до прикладу ingress вище
+spec:
+  tls:
+    - hosts:
+        - myapp.local
+      secretName: myapp-tls
+  rules:
+    # ... без змін
+```
+
+**Автоматизований шлях** — cert-manager сам випускає і поновлює сертифікати Let's Encrypt:
+
+```bash
+# Встановити cert-manager через Helm
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
+```
+
+```yaml
+# clusterissuer.yaml — Let's Encrypt з HTTP-01 через вбудований Traefik
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: you@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: traefik
+```
+
+```yaml
+# На Ingress: одна анотація + spec.tls — решту робить cert-manager
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - myapp.example.com
+      secretName: myapp-tls   # cert-manager сам створює і поновлює цей секрет
+```
+
+> **У цьому репозиторії:** демо-чарт [`../examples/helm/myapp`](../examples/helm/myapp)
+> містить опційний ingress, готовий до TLS — вмикається через `ingress.enabled`
+> та `ingress.tls.enabled` у `values.yaml`.
+
 ### Port-forward для локальної розробки
 
 ```bash
@@ -445,7 +587,7 @@ kubectl get nodes -o wide
 
 ---
 
-## 7. Storage та PVC
+## 8. Storage та PVC
 
 ### Терміни
 
@@ -596,7 +738,7 @@ kubectl edit pvc myapp-data -n my-namespace
 
 ---
 
-## 8. Секрети та ConfigMap
+## 9. Секрети та ConfigMap
 
 ### ConfigMap
 
@@ -652,7 +794,78 @@ kubectl rollout restart deployment/myapp -n my-namespace
 
 ---
 
-## 9. Мультинодовий кластер
+## 10. Основи RBAC
+
+### Сценарій: CI-пайплайн деплоїть в один namespace і більше нікуди
+
+CI-джоба не повинна користуватись адмінським kubeconfig. Дайте їй ServiceAccount,
+чиї права закінчуються на межі namespace:
+
+```yaml
+# ci-deployer.yaml — ServiceAccount + Role + RoleBinding
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployer
+  namespace: myns
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deployer
+  namespace: myns
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-deployer
+  namespace: myns
+subjects:
+  - kind: ServiceAccount
+    name: ci-deployer
+    namespace: myns
+roleRef:
+  kind: Role
+  name: ci-deployer
+  apiGroup: rbac.authorization.k8s.io
+```
+
+```bash
+kubectl apply -f ci-deployer.yaml
+
+# Видати токен для CI (рік; коротший — краще, якщо CI вміє його оновлювати)
+kubectl create token ci-deployer -n myns --duration=8760h
+# Альтернатива: bound token Secret (тип kubernetes.io/service-account-token)
+# не протухає, але його треба відкликати вручну
+
+# Підключити токен в окремий kubeconfig для CI:
+# kubectl config set-credentials ci-deployer --token=<TOKEN>
+# kubectl config set-context ci --cluster=<cluster> --user=ci-deployer --namespace=myns
+```
+
+> **Role vs ClusterRole:** `Role` працює всередині одного namespace;
+> `ClusterRole` покриває cluster-wide ресурси (ноди, PV) або всі namespace одразу.
+> Для CI-деплоїв namespace-обмежений `Role` — саме те, що треба (least privilege).
+
+```bash
+# Перевірити: що цей ServiceAccount реально може?
+kubectl auth can-i --as=system:serviceaccount:myns:ci-deployer \
+  create deployments -n myns          # yes
+
+kubectl auth can-i --as=system:serviceaccount:myns:ci-deployer \
+  delete pods -n kube-system          # no — в цьому і сенс
+```
+
+---
+
+## 11. Мультинодовий кластер
 
 ### Single-node vs Multi-node
 
@@ -723,7 +936,7 @@ kubectl uncordon worker-1
 
 ---
 
-## 10. Корисні аліаси та скрипти
+## 12. Корисні аліаси та скрипти
 
 ### ~/.bashrc / ~/.zshrc — додати ці аліаси
 
@@ -792,6 +1005,10 @@ chmod +x deploy-local.sh
 ./deploy-local.sh myapp v1.2.0 production
 ```
 
+> **У цьому репозиторії:** повніша версія цього скрипта лежить у
+> [`../examples/k3s/deploy.sh`](../examples/k3s/deploy.sh) — вона додає Helm-деплой
+> з `--atomic`, створення namespace та перевірку залежностей.
+
 ### Скрипт: повна діагностика namespace
 
 ```bash
@@ -845,6 +1062,35 @@ kubectl get events -n $NS \
 ---
 
 ## Типові маніфести для швидкого старту
+
+### CronJob (задача за розкладом)
+
+> **Deployment** — для процесів, що працюють постійно (веб-сервери, воркери).
+> **Job** виконується один раз до завершення; **CronJob** запускає Job за розкладом —
+> використовуйте їх для міграцій, бекапів, генерації звітів.
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  namespace: my-namespace
+spec:
+  schedule: "0 3 * * *"           # щодня о 03:00 (cron-синтаксис)
+  concurrencyPolicy: Forbid       # не запускати новий запуск, поки триває попередній
+  successfulJobsHistoryLimit: 3   # тримати останні 3 успішні pod-и для логів
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2             # повторити невдалий запуск максимум 2 рази
+      template:
+        spec:
+          restartPolicy: Never    # для Job: Never або OnFailure, не Always
+          containers:
+            - name: backup
+              image: my-registry/backup-tool:latest
+              args: ["--target", "s3://backups/daily"]
+```
 
 ### Мінімальний Deployment + Service
 
@@ -905,6 +1151,10 @@ spec:
 ---
 
 > **Порада:** Зберігайте всі маніфести у Git. Використовуйте `kubectl apply -f ./` для всієї теки.
-> Для складніших проектів — розгляньте Helm або Kustomize.
+> Для складніших проектів оберіть інструмент пакування:
 >
-> **Helm:** детальний практичний довідник → [helm-guide.md](./helm-guide.md)
+> - **Helm** — шаблонізація + версіоновані релізи + rollback; найкраще для перевикористовуваних,
+>   мультисередовищних пакетів → [helm-guide.md](./helm-guide.md)
+> - **Kustomize** — патчі/overlay поверх звичайного YAML, вбудований у kubectl (`kubectl apply -k`);
+>   найкраще, коли шаблонізація взагалі не потрібна
+> - Переходите з Docker Compose? → [compose-to-helm.md](./compose-to-helm.md)

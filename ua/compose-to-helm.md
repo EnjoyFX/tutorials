@@ -3,6 +3,8 @@
 > Типовий шлях: застосунок працює локально через `compose.yaml` — потрібно задеплоїти в k3s.
 > Цей гайд — покроковий перехід від Compose до Helm chart без магії.
 
+> **Дивись також:** [Docker](docker-guide.md) · [Linux](linux-guide.md) · [Helm](helm-guide.md) · [k3s](k3s-dev-guide.md) · [Розбір демо](examples-guide.md) · [Демо-приклад](../examples/README.md)
+
 ---
 
 ## Зміст
@@ -19,6 +21,7 @@
 10. [Крок 7 — пакуємо в Helm chart](#10-крок-7--пакуємо-в-helm-chart)
 11. [Автоматична конвертація — kompose](#11-автоматична-конвертація--kompose)
 12. [Повний вигляд чарту](#12-повний-вигляд-чарту)
+13. [Поширення чарту](#13-поширення-чарту)
 
 ---
 
@@ -82,6 +85,10 @@ volumes:
 ```
 
 Мета: перенести це в k3s, зберігши ту саму поведінку.
+
+У репозиторії також є мінімальний робочий compose-файл для демо-застосунку —
+[`../examples/docker/compose.yaml`](../examples/docker/compose.yaml) — і його Helm-двійник у
+[`../examples/helm/myapp`](../examples/helm/myapp), тож усю міграцію можна пройти на практиці.
 
 ---
 
@@ -206,6 +213,12 @@ spec:
             periodSeconds: 10
 ```
 
+Зверни увагу на різницю між двома probe: якщо провалюється `readinessProbe` — pod
+продовжує працювати, але не отримує трафік від Service; якщо провалюється `livenessProbe` —
+контейнер перезапускається. Типова помилка — направити liveness на залежність
+(наприклад, `/health`, який перевіряє БД): падіння БД тоді спричиняє цикл рестартів
+замість спокійного очікування.
+
 **postgres:**
 
 ```yaml
@@ -244,6 +257,38 @@ spec:
           persistentVolumeClaim:
             claimName: postgres-pvc
 ```
+
+> ❌ **Deployment для бази даних — тільки для dev.** Production-база хоче
+> `StatefulSet`: стабільне мережеве ім'я, впорядкований rollout, `volumeClaimTemplates`
+> для кожної репліки. А ще краще — оператор (наприклад, CloudNativePG) або managed-база поза кластером.
+
+### imagePullSecrets — приватний registry
+
+Якщо образ лежить у приватному registry, кластеру потрібні креденшали, щоб його стягнути:
+
+```bash
+# Креденшали registry як Secret
+kubectl create secret docker-registry regcred \
+  --docker-server=my-registry.example.com \
+  --docker-username=deploy \
+  --docker-password='S3cret!' \
+  -n my-namespace
+```
+
+```yaml
+# У pod spec Deployment-а
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: app
+          image: my-registry.example.com/myapp:v1.0.0
+```
+
+У кроці з чартом це стає параметром у `values.yaml` (`imagePullSecrets: [{name: regcred}]`) —
+для dev без registry список просто лишається порожнім.
 
 ---
 
@@ -363,12 +408,24 @@ myapp/
 ├── values.yaml
 └── templates/
     ├── _helpers.tpl
+    ├── NOTES.txt
     ├── app-deployment.yaml
     ├── app-service.yaml
     ├── app-configmap.yaml
     ├── postgres-deployment.yaml
     ├── postgres-service.yaml
     └── postgres-pvc.yaml
+```
+
+**Chart.yaml** — метадані чарту, мінімальний повний варіант:
+
+```yaml
+apiVersion: v2                # завжди v2 для Helm 3
+name: myapp
+description: Python app + PostgreSQL, migrated from Docker Compose
+type: application
+version: 0.1.0                # версія чарту — піднімай при кожній зміні чарту
+appVersion: "1.0.0"           # версія застосунку — інформаційна
 ```
 
 **values.yaml** — все що різниться між dev і prod:
@@ -379,6 +436,7 @@ app:
     repository: my-registry/myapp
     tag: "v1.0.0"
     pullPolicy: IfNotPresent
+  imagePullSecrets: []        # напр. [{name: regcred}] для приватного registry
   replicaCount: 1
   message: "Hello from Helm!"
   resources:
@@ -396,6 +454,11 @@ postgres:
   existingSecret: postgres-secrets   # Secret створюється окремо, поза чартом
   storage: 1Gi
 ```
+
+Також варто додати `templates/NOTES.txt` — текстовий шаблон, який Helm рендерить і показує
+після `helm install` / `helm upgrade`. Поклади туди найнеобхідніше після встановлення,
+наприклад команду port-forward:
+`kubectl port-forward service/app-service 8080:8080 -n {{ .Release.Namespace }}`.
 
 **Деплой:**
 
@@ -416,6 +479,21 @@ helm upgrade --install myapp ./myapp \
 kubectl get all -n demo
 kubectl port-forward service/app-service 8080:8080 -n demo
 ```
+
+### Перевір міграцію перед тим, як чіпати кластер
+
+```bash
+# Відрендерити шаблони локально і переглянути маніфести
+helm template ./myapp | less
+
+# Повна client-side валідація з values і хуками, без встановлення
+helm install myapp ./myapp --dry-run --debug -n demo
+
+# Server-side перевірка схеми — валідує API server, нічого не створюється
+helm template ./myapp | kubectl apply --dry-run=server -f -
+```
+
+Так помилки схем і шаблонів ловляться до того, як щось потрапить у кластер.
 
 ---
 
@@ -483,3 +561,28 @@ docker compose up
 # Staging / production — через Helm
 helm upgrade --install myapp ./myapp -n demo --wait
 ```
+
+---
+
+## 13. Поширення чарту
+
+Чарт працює — де йому жити?
+
+| Варіант | Коли підходить |
+|---|---|
+| У репозиторії застосунку (напр. `deploy/chart/`) | найпростіше — чарт версіонується разом з кодом |
+| Класичний chart repo (`helm package` + repo index) | кілька команд / багато чартів, доступ через HTTP |
+| OCI registry (`helm push`) | вже є container registry — використовуй його ж |
+
+```bash
+# Класичний chart repo: пакуємо + index
+helm package ./myapp                      # → myapp-0.1.0.tgz
+helm repo index . --url https://charts.example.com
+
+# OCI registry — той самий registry, де лежать образи
+helm push myapp-0.1.0.tgz oci://my-registry.example.com/helm-charts
+helm install myapp oci://my-registry.example.com/helm-charts/myapp --version 0.1.0
+```
+
+Деталі OCI та глибші теми Helm — у [helm-guide.md](helm-guide.md);
+деплой і траблшутинг на реальному кластері — у [k3s-dev-guide.md](k3s-dev-guide.md).
